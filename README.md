@@ -4,7 +4,7 @@
 
 ---
 
-## 🛠️ Setup do Ambiente / Environment Setup
+## 🛠️ Environment Setup
 
 Before using Haumea, set up your system with the required dependencies and tool permissions:
 
@@ -33,7 +33,7 @@ This project uses the precompiled Go binary from [google-maps-scraper](https://g
 
 ---
 
-## 🚀 Como Executar o Pipeline / How to Run the Pipeline
+## 🚀 How to Run the Pipeline
 
 The [haumea](file:///home/panemiko/Documentos/Haumea/system/haumea) CLI coordinates all scripts. You can run individual stages or run the entire pipeline at once.
 
