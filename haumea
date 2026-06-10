@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+import argparse
+import sys
+from pathlib import Path
+
+# Add project root to sys.path to ensure scripts package is importable when running haumea
+project_root = Path(__file__).resolve().parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from scripts.scraper import run_scraper
+from scripts.cleaner import clean_csv
+from scripts.reviewer import review_csv
+from scripts.register import register_json
+
+def show_help(subcommand=None):
+    """Prints usage details for the main command and individual subcommands."""
+    if subcommand == 'scrape':
+        print("""
+Usage: haumea scrape <keywords> [options]
+
+Run the Google Maps Scraper on the provided keywords.
+
+Arguments:
+  keywords              Keywords/queries to search (can be multiple space-separated words,
+                        or comma-separated for multiple queries).
+
+Options:
+  -o, --output          Path to the output raw CSV file.
+                        Defaults to '<sanitized_first_query>.csv'.
+  -d, --depth           Maximum scroll depth in search results. Default is 10.
+""")
+    elif subcommand == 'clean':
+        print("""
+Usage: haumea clean <input_file> [options]
+
+Clean a CSV file by keeping only specific fields and adding new columns.
+
+Arguments:
+  input_file            Path to the input CSV file.
+
+Options:
+  -o, --output          Path to the output CSV file. 
+                        Defaults to '<input_filename>_cleaned.csv'.
+""")
+    elif subcommand == 'review':
+        print("""
+Usage: haumea review <input_file> [options]
+
+Review business websites by capturing screenshots and collecting feedback.
+
+Arguments:
+  input_file            Path to the cleaned CSV file.
+
+Options:
+  -s, --screenshot-dir  Directory to save screenshots. 
+                        Defaults to 'screenshots' next to the input file.
+""")
+    elif subcommand == 'register':
+        print("""
+Usage: haumea register <json_file>
+
+Read a JSON file and POST its content to the webhook API.
+
+Arguments:
+  json_file             Path to the JSON file containing the registration information.
+""")
+    elif subcommand == 'all':
+        print("""
+Usage: haumea [all] <input_file> [options]
+
+Run the unified pipeline: clean and then review.
+
+Arguments:
+  input_file            Path to an existing CSV file.
+
+Options:
+  -o, --output          Path to the final cleaned CSV file.
+                        Defaults to '<input_filename>_cleaned.csv'.
+  -s, --screenshot-dir  Directory to save screenshots.
+                        Defaults to 'screenshots' next to the output file.
+""")
+    else:
+        print("""
+Haumea CLI: Unified Scrape, Clean, and Review Tool
+
+Usage: haumea [all] <input_file> [options]               Run the clean and review pipeline (default)
+  haumea scrape <keywords> [options]                Run scraper only
+  haumea clean <input_file> [options]               Run clean module only
+  haumea review <input_file> [options]              Run review module only
+  haumea register <json_file>                       Register information to webhook
+  haumea help [subcommand]                          Show help for a command
+
+Subcommands:
+  scrape            Run the Google Maps Scraper on the provided keywords.
+  clean             Clean a CSV file (keep specific fields, add columns).
+  review            Capture website screenshots and collect user feedback.
+  register          Post JSON file content to the webhook API.
+  all               Clean and then review.
+  help              Display help information.
+
+Run 'python haumea help <subcommand>' for details on a specific subcommand.
+""")
+
+
+def main():
+    # Helper to check for subcommands
+    subcommands = {"scrape", "clean", "review", "all", "help", "register"}
+    
+    # 1. Preprocess arguments: If no arguments, show general help.
+    if len(sys.argv) == 1:
+        show_help()
+        sys.exit(0)
+        
+    # 2. Check if user is asking for general help with standard flags
+    if sys.argv[1] in ("-h", "--help"):
+        show_help()
+        sys.exit(0)
+        
+    # 3. If first argument is not a known subcommand and doesn't start with "-",
+    # insert "all" to trigger both modules by default.
+    if sys.argv[1] not in subcommands and not sys.argv[1].startswith("-"):
+        sys.argv.insert(1, "all")
+        
+    # argparse setup
+    parser = argparse.ArgumentParser(description="Haumea: Clean and/or review business websites.", add_help=False)
+    subparsers = parser.add_subparsers(dest="command")
+    
+    # Scrape Parser
+    scrape_parser = subparsers.add_parser("scrape", add_help=False)
+    scrape_parser.add_argument("keywords", nargs="+")
+    scrape_parser.add_argument("-o", "--output")
+    scrape_parser.add_argument("-d", "--depth", type=int, default=10)
+    
+    # Clean Parser
+    clean_parser = subparsers.add_parser("clean", add_help=False)
+    clean_parser.add_argument("input_file")
+    clean_parser.add_argument("-o", "--output")
+    
+    # Review Parser
+    review_parser = subparsers.add_parser("review", add_help=False)
+    review_parser.add_argument("input_file")
+    review_parser.add_argument("-s", "--screenshot-dir")
+    
+    # Register Parser
+    register_parser = subparsers.add_parser("register", add_help=False)
+    register_parser.add_argument("json_file")
+    
+    
+    # All Parser
+    all_parser = subparsers.add_parser("all", add_help=False)
+    all_parser.add_argument("input_file", nargs="+")
+    all_parser.add_argument("-o", "--output")
+    all_parser.add_argument("-s", "--screenshot-dir")
+    
+    # Help Parser
+    help_parser = subparsers.add_parser("help", add_help=False)
+    help_parser.add_argument("subcommand", nargs="?", default=None)
+    
+    # Parse args
+    args, unknown = parser.parse_known_args()
+    
+    # Handle help subcommand
+    if args.command == "help":
+        show_help(args.subcommand)
+        sys.exit(0)
+        
+    # Handle scrape subcommand
+    elif args.command == "scrape":
+        keywords = " ".join(args.keywords)
+        run_scraper(keywords, Path(args.output) if args.output else None, depth=args.depth)
+        
+    # Handle clean subcommand
+    elif args.command == "clean":
+        clean_csv(Path(args.input_file), Path(args.output) if args.output else None)
+        
+    # Handle review subcommand
+    elif args.command == "review":
+        review_csv(Path(args.input_file), Path(args.screenshot_dir) if args.screenshot_dir else None)
+        
+    # Handle register subcommand
+    elif args.command == "register":
+        register_json(Path(args.json_file))
+        
+        
+    # Handle all subcommand (runs both by default)
+    elif args.command == "all":
+        input_args = args.input_file
+        if len(input_args) == 1:
+            input_file = Path(input_args[0])
+            if input_file.exists() and input_file.is_file():
+                # Define temp directory relative to the project root
+                temp_dir = project_root / "temp"
+                temp_dir.mkdir(exist_ok=True)
+                
+                # Intermediate cleaned file inside the temp folder
+                intermediate_cleaned = temp_dir / f"{input_file.stem}_cleaned{input_file.suffix}"
+                
+                # Clean CSV into the intermediate path
+                clean_csv(input_file, intermediate_cleaned)
+                
+                # Determine final output path (outside temp)
+                if args.output:
+                    final_output = Path(args.output)
+                else:
+                    final_output = input_file.parent / f"{input_file.stem}_cleaned_qualified{input_file.suffix}"
+                    
+                # Determine screenshots directory (default is inside the temp folder)
+                if args.screenshot_dir:
+                    screenshot_dir = Path(args.screenshot_dir)
+                else:
+                    screenshot_dir = temp_dir / "screenshots"
+                
+                # Run review
+                review_csv(intermediate_cleaned, screenshot_dir=screenshot_dir, output_file=final_output)
+            elif not input_file.exists():
+                print(f"Error: Input file '{input_file}' not found.", file=sys.stderr)
+                print("If you meant to search/scrape, run the 'scrape' subcommand directly:", file=sys.stderr)
+                print(f"  haumea scrape \"{input_file}\"", file=sys.stderr)
+                sys.exit(1)
+            else:
+                print(f"Error: '{input_file}' is not a file.", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print("Error: Please specify a single existing CSV file for the pipeline.", file=sys.stderr)
+            print("If you meant to search/scrape, run the 'scrape' subcommand directly:", file=sys.stderr)
+            print("  haumea scrape <keywords>", file=sys.stderr)
+            sys.exit(1)
+        
+    else:
+        # Fallback
+        show_help()
+        sys.exit(0)
+
+if __name__ == "__main__":
+    main()
