@@ -36,14 +36,22 @@ def locate_scraper_binary() -> Path:
     return exact_binary
 
 
-def run_scraper(keywords_str: str, output_path: Path = None, depth: int = 10) -> Path:
+def run_scraper(keywords_str: str, output_path: Path = None, depth: int = 100, location: str = None,
+                zoom: int = None, radius: float = None, geo: str = None,
+                grid_bbox: str = None, grid_cell: float = None, fast_mode: bool = False,
+                concurrency: int = None, email: bool = True) -> Path:
     """Runs the Google Maps Scraper on the provided keywords."""
-    if ',' in keywords_str:
+    if ';' in keywords_str:
+        queries = [q.strip() for q in keywords_str.split(';') if q.strip()]
+    elif ',' in keywords_str:
         queries = [q.strip() for q in keywords_str.split(',') if q.strip()]
     elif '\n' in keywords_str:
         queries = [q.strip() for q in keywords_str.split('\n') if q.strip()]
     else:
-        queries = [keywords_str.strip()]
+        queries = [q.strip() for q in keywords_str.split() if q.strip()]
+        
+    if location:
+        queries = [f"{q} {location.strip()}" for q in queries]
         
     if not queries or not queries[0]:
         print("Error: No valid keywords/queries provided.", file=sys.stderr)
@@ -60,9 +68,9 @@ def run_scraper(keywords_str: str, output_path: Path = None, depth: int = 10) ->
         base_name = sanitize_filename(queries[0])
         if len(queries) > 1:
             base_name += "_multi"
-        output_path = project_root / f"{base_name}.csv"
+        output_path = Path.cwd() / f"{base_name}.csv"
     else:
-        output_path = Path(output_path)
+        output_path = Path(output_path).resolve()
         
     print(f"\n--- STARTING GOOGLE MAPS SCRAPER ---")
     print(f"Scraper binary: {binary_path}")
@@ -78,12 +86,28 @@ def run_scraper(keywords_str: str, output_path: Path = None, depth: int = 10) ->
                 
         cmd = [
             str(binary_path),
-            "-input", str(temp_query_file),
-            "-results", str(output_path),
-            "-depth", str(depth),
-            "-email"
+            f"-input={temp_query_file}",
+            f"-results={output_path}",
+            f"-depth={depth}"
         ]
+        if email:
+            cmd.append("-email")
         
+        if zoom is not None:
+            cmd.append(f"-zoom={zoom}")
+        if radius is not None:
+            cmd.append(f"-radius={radius}")
+        if geo is not None:
+            cmd.append(f"-geo={geo}")
+        if grid_bbox is not None:
+            cmd.append(f"-grid-bbox={grid_bbox}")
+        if grid_cell is not None:
+            cmd.append(f"-grid-cell={grid_cell}")
+        if fast_mode:
+            cmd.append("-fast-mode")
+        if concurrency is not None:
+            cmd.append(f"-c={concurrency}")
+            
         print(f"Running command: {' '.join(cmd)}")
         res = subprocess.run(cmd, check=True)
         

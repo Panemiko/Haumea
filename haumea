@@ -12,6 +12,7 @@ from scripts.scraper import run_scraper
 from scripts.cleaner import clean_csv
 from scripts.reviewer import review_csv
 from scripts.register import register_json
+from scripts.utils import parse_grid_option
 
 def show_help(subcommand=None):
     """Prints usage details for the main command and individual subcommands."""
@@ -28,7 +29,18 @@ Arguments:
 Options:
   -o, --output          Path to the output raw CSV file.
                         Defaults to '<sanitized_first_query>.csv'.
-  -d, --depth           Maximum scroll depth in search results. Default is 10.
+  -d, --depth           Maximum scroll depth in search results. Default is 100.
+  -l, --location        Location string to append to all queries.
+  -z, --zoom            Set zoom level (0-21) for search.
+  -r, --radius          Search radius in meters.
+  -g, --geo             Set geo coordinates (e.g., 'latitude,longitude').
+  -gb, --grid-bbox      Bounding box for grid scraping ('minLat,minLon,maxLat,maxLon').
+  -gc, --grid-cell      Grid cell size in km (e.g., 1.0).
+  -f, --fast-mode       Enable fast mode (reduced data collection).
+  -c, --concurrency     Set the concurrency (number of browser contexts/jobs).
+  --grid                Easy grid config: 'lat,lon' (default 5km radius), 'lat,lon,radius_km', or 'minLat,minLon,maxLat,maxLon'.
+                        Automatically configures grid box, zoom (16), and cell size (0.5).
+  --no-email            Disable extracting emails from websites.
 """)
     elif subcommand == 'clean':
         print("""
@@ -42,6 +54,7 @@ Arguments:
 Options:
   -o, --output          Path to the output CSV file. 
                         Defaults to '<input_filename>_cleaned.csv'.
+  --no-cnpj             Disable matching and enriching leads with local CNPJ data.
 """)
     elif subcommand == 'review':
         print("""
@@ -55,6 +68,7 @@ Arguments:
 Options:
   -s, --screenshot-dir  Directory to save screenshots. 
                         Defaults to 'screenshots' next to the input file.
+  -m, --mode            Operation mode: 'complete' (default) or 'remover'.
 """)
     elif subcommand == 'register':
         print("""
@@ -64,6 +78,32 @@ Read a JSON file and POST its content to the webhook API.
 
 Arguments:
   json_file             Path to the JSON file containing the registration information.
+""")
+    elif subcommand == 'duplicates':
+        print("""
+Usage: haumea duplicates
+
+Check for duplicate records (by WhatsApp and CNPJ) in the Twenty CRM.
+""")
+    elif subcommand == 'normalize':
+        print("""
+Usage: haumea normalize
+
+Trim company names and synchronize opportunity names (companies -> opportunities) in Twenty CRM.
+""")
+    elif subcommand == 'convert':
+        print("""
+Usage: haumea convert <input_file> [options]
+
+Convert any CSV sheet into a registry-ready JSON file.
+
+Arguments:
+  input_file            Path to the input CSV file.
+
+Options:
+  -o, --output          Path to the output JSON file.
+                        Defaults to '<input_filename>.json'.
+  --no-mapping          Do not map custom columns or normalize fields.
 """)
     elif subcommand == 'all':
         print("""
@@ -79,6 +119,8 @@ Options:
                         Defaults to '<input_filename>_cleaned.csv'.
   -s, --screenshot-dir  Directory to save screenshots.
                         Defaults to 'screenshots' next to the output file.
+  -m, --mode            Operation mode: 'complete' (default) or 'remover'.
+  --no-cnpj             Disable matching and enriching leads with local CNPJ data.
 """)
     else:
         print("""
@@ -88,14 +130,20 @@ Usage: haumea [all] <input_file> [options]               Run the clean and revie
   haumea scrape <keywords> [options]                Run scraper only
   haumea clean <input_file> [options]               Run clean module only
   haumea review <input_file> [options]              Run review module only
+  haumea convert <input_file> [options]             Convert CSV sheet to JSON format
   haumea register <json_file>                       Register information to webhook
+  haumea duplicates                                 Check for duplicates in CRM
+  haumea normalize                                  Trim company names and sync opportunity names in CRM
   haumea help [subcommand]                          Show help for a command
 
 Subcommands:
   scrape            Run the Google Maps Scraper on the provided keywords.
   clean             Clean a CSV file (keep specific fields, add columns).
   review            Capture website screenshots and collect user feedback.
+  convert           Convert any CSV sheet into a registry-ready JSON file.
   register          Post JSON file content to the webhook API.
+  duplicates        Check for duplicate records (by WhatsApp and CNPJ) in the CRM.
+  normalize         Trim company names and sync opportunity names in CRM.
   all               Clean and then review.
   help              Display help information.
 
@@ -105,7 +153,7 @@ Run 'python haumea help <subcommand>' for details on a specific subcommand.
 
 def main():
     # Helper to check for subcommands
-    subcommands = {"scrape", "clean", "review", "all", "help", "register"}
+    subcommands = {"scrape", "clean", "review", "all", "help", "register", "convert", "duplicates", "normalize"}
     
     # 1. Preprocess arguments: If no arguments, show general help.
     if len(sys.argv) == 1:
@@ -130,21 +178,45 @@ def main():
     scrape_parser = subparsers.add_parser("scrape", add_help=False)
     scrape_parser.add_argument("keywords", nargs="+")
     scrape_parser.add_argument("-o", "--output")
-    scrape_parser.add_argument("-d", "--depth", type=int, default=10)
+    scrape_parser.add_argument("-d", "--depth", type=int, default=100)
+    scrape_parser.add_argument("-l", "--location", default=None)
+    scrape_parser.add_argument("-z", "--zoom", type=int, default=None)
+    scrape_parser.add_argument("-r", "--radius", type=float, default=None)
+    scrape_parser.add_argument("-g", "--geo", default=None)
+    scrape_parser.add_argument("-gb", "--grid-bbox", default=None)
+    scrape_parser.add_argument("-gc", "--grid-cell", type=float, default=None)
+    scrape_parser.add_argument("-f", "--fast-mode", action="store_true")
+    scrape_parser.add_argument("-c", "--concurrency", type=int, default=None)
+    scrape_parser.add_argument("--grid", default=None)
+    scrape_parser.add_argument("--no-email", action="store_true")
     
     # Clean Parser
     clean_parser = subparsers.add_parser("clean", add_help=False)
     clean_parser.add_argument("input_file")
     clean_parser.add_argument("-o", "--output")
+    clean_parser.add_argument("--no-cnpj", action="store_true")
     
     # Review Parser
     review_parser = subparsers.add_parser("review", add_help=False)
     review_parser.add_argument("input_file")
     review_parser.add_argument("-s", "--screenshot-dir")
+    review_parser.add_argument("-m", "--mode", choices=["complete", "remover"], default="complete")
     
     # Register Parser
     register_parser = subparsers.add_parser("register", add_help=False)
     register_parser.add_argument("json_file")
+    
+    # Duplicates Parser
+    duplicates_parser = subparsers.add_parser("duplicates", add_help=False)
+    
+    # Normalize Parser
+    normalize_parser = subparsers.add_parser("normalize", add_help=False)
+    
+    # Convert Parser
+    convert_parser = subparsers.add_parser("convert", add_help=False)
+    convert_parser.add_argument("input_file")
+    convert_parser.add_argument("-o", "--output")
+    convert_parser.add_argument("--no-mapping", action="store_true")
     
     
     # All Parser
@@ -152,6 +224,8 @@ def main():
     all_parser.add_argument("input_file", nargs="+")
     all_parser.add_argument("-o", "--output")
     all_parser.add_argument("-s", "--screenshot-dir")
+    all_parser.add_argument("-m", "--mode", choices=["complete", "remover"], default="complete")
+    all_parser.add_argument("--no-cnpj", action="store_true")
     
     # Help Parser
     help_parser = subparsers.add_parser("help", add_help=False)
@@ -168,19 +242,74 @@ def main():
     # Handle scrape subcommand
     elif args.command == "scrape":
         keywords = " ".join(args.keywords)
-        run_scraper(keywords, Path(args.output) if args.output else None, depth=args.depth)
+        
+        # Determine values with --grid fallback
+        zoom = args.zoom
+        radius = args.radius
+        geo = args.geo
+        grid_bbox = args.grid_bbox
+        grid_cell = args.grid_cell
+        
+        if args.grid:
+            try:
+                grid_info = parse_grid_option(args.grid)
+                if grid_bbox is None:
+                    grid_bbox = grid_info.get('grid_bbox')
+                if grid_cell is None:
+                    grid_cell = grid_info.get('grid_cell')
+                if zoom is None:
+                    zoom = grid_info.get('zoom')
+                if geo is None:
+                    geo = grid_info.get('geo')
+            except ValueError as e:
+                print(f"Error parsing --grid option: {e}", file=sys.stderr)
+                sys.exit(1)
+                
+        run_scraper(
+            keywords,
+            Path(args.output) if args.output else None,
+            depth=args.depth,
+            location=args.location,
+            zoom=zoom,
+            radius=radius,
+            geo=geo,
+            grid_bbox=grid_bbox,
+            grid_cell=grid_cell,
+            fast_mode=args.fast_mode,
+            concurrency=args.concurrency,
+            email=not args.no_email
+        )
         
     # Handle clean subcommand
     elif args.command == "clean":
-        clean_csv(Path(args.input_file), Path(args.output) if args.output else None)
+        clean_csv(Path(args.input_file), Path(args.output) if args.output else None, skip_cnpj=args.no_cnpj)
         
     # Handle review subcommand
     elif args.command == "review":
-        review_csv(Path(args.input_file), Path(args.screenshot_dir) if args.screenshot_dir else None)
+        review_csv(Path(args.input_file), Path(args.screenshot_dir) if args.screenshot_dir else None, mode=args.mode)
         
     # Handle register subcommand
     elif args.command == "register":
         register_json(Path(args.json_file))
+        
+    # Handle duplicates subcommand
+    elif args.command == "duplicates":
+        from scripts.register import check_duplicates
+        check_duplicates()
+        
+    # Handle normalize subcommand
+    elif args.command == "normalize":
+        from scripts.register import normalize_crm_names
+        normalize_crm_names()
+        
+    # Handle convert subcommand
+    elif args.command == "convert":
+        from scripts.converter import convert_csv_to_json
+        convert_csv_to_json(
+            Path(args.input_file),
+            Path(args.output) if args.output else None,
+            apply_mapping=not args.no_mapping
+        )
         
         
     # Handle all subcommand (runs both by default)
@@ -197,7 +326,7 @@ def main():
                 intermediate_cleaned = temp_dir / f"{input_file.stem}_cleaned{input_file.suffix}"
                 
                 # Clean CSV into the intermediate path
-                clean_csv(input_file, intermediate_cleaned)
+                clean_csv(input_file, intermediate_cleaned, skip_cnpj=args.no_cnpj)
                 
                 # Determine final output path (outside temp)
                 if args.output:
@@ -212,7 +341,7 @@ def main():
                     screenshot_dir = temp_dir / "screenshots"
                 
                 # Run review
-                review_csv(intermediate_cleaned, screenshot_dir=screenshot_dir, output_file=final_output)
+                review_csv(intermediate_cleaned, screenshot_dir=screenshot_dir, output_file=final_output, mode=args.mode)
             elif not input_file.exists():
                 print(f"Error: Input file '{input_file}' not found.", file=sys.stderr)
                 print("If you meant to search/scrape, run the 'scrape' subcommand directly:", file=sys.stderr)
