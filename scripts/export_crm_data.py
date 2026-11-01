@@ -37,7 +37,8 @@ def make_twenty_request(endpoint: str, method: str = "GET", token: str = None, b
     
     headers = {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Haumea/1.0"
     }
     
     max_retries = 5

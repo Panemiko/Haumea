@@ -156,7 +156,7 @@ def clean_csv(input_path: Path, output_path: Path = None, skip_cnpj: bool = Fals
             sample = infile.read(2048)
             infile.seek(0)
             try:
-                dialect = csv.Sniffer().sniff(sample)
+                dialect = csv.Sniffer().sniff(sample, delimiters=[',', ';', '\t'])
             except Exception:
                 dialect = 'excel'
                 

@@ -54,7 +54,7 @@ def map_market(category: str) -> str:
         "PRIVATE_TUTOR", "ENDOCRINOLOGIST", "PROCTOLOGIST", "BEAUTICIAN",
         "DOCTOR", "GENEALOGIST", "HAIR_REPLACEMENT_SERVICE", "HEALTH_AND_BEAUTY_SHOP",
         "MATERNITY_STORE", "MEDICAL_CLINIC", "NUTRITIONIST", "ORGANIC_FOOD_STORE",
-        "PEDIATRICIAN", "PHYSICAL_THERAPY_CLINIC", "PILATES_STUDIO"
+        "PEDIATRICIAN", "PHYSICAL_THERAPY_CLINIC", "PILATES_STUDIO", "THERAPIST"
     ]
     
     # Common mappings (Português/Inglês -> Twenty Enum)
@@ -187,11 +187,29 @@ def clean_company_name(name: str) -> str:
     desc_words = {
         "nutricionista", "nutri", "emagrecimento", "performance", "esportiva", "longevidade",
         "clínica", "clinica", "consultório", "consultorio", "bariátrica", "bariatrica",
-        "estética", "estetica", "fonoaudióloga", "fonoaudiologa", "saúde", "saude", 
+        "estética", "estetica", "esteticista", "fonoaudióloga", "fonoaudiologa", "saúde", "saude", 
         "lajeado", "rs", "vale do taquari", "ayurveda", "estúdio", "studio",
         "psicóloga", "psicologa", "psicólogo", "psicologo", "psicologia", "psicoterapia",
-        "terapeuta", "espaço", "terapêutico", "terapeutico", "centro", "neuropsicólogo",
-        "neuropsicologa", "neuropsicologia", "crp", "dr", "dra"
+        "psicanalista", "psicanálise", "psicanalise",
+        "terapeuta", "terapeutas", "terapia", "terapias",
+        "escanalista",
+        "hipnose", "hipnoterapeuta", "hipnoterapia",
+        "neuropsicóloga", "neuropsicologa", "neuropsicólogo", "neuropsicologo",
+        "neuropsicologia", "neuropsicopedagoga", "neuropsicopedagogia",
+        "consteladora", "constelador", "constelação", "constelacao",
+        "coach", "coaching",
+        "massoterapeuta", "massoterapia", "acupunturista", "acupuntura",
+        "musicoterapeuta", "musicoterapia",
+        "holística", "holistica", "holísticas", "holisticas",
+        "integrativa", "integrativas", "integradas", "integrada",
+        "integrado", "integrados",
+        "sistêmica", "sistemica",
+        "sistêmicas", "sistemicas",
+        "cognitiva", "cognitivo", "comportamental", "infantil",
+        "familiar", "vida",
+        "online", "atendimento",
+        "espaço", "terapêutico", "terapeutico", "centro",
+        "crp", "dr", "dra"
     }
     
     filtered_parts = []
@@ -232,6 +250,9 @@ def clean_company_name(name: str) -> str:
         r'^\s*clinica\s+de\s+psicologia\s+',
         r'^\s*clínica\s+de\s+',
         r'^\s*clinica\s+de\s+',
+        r'^\s*clínica\s+',
+        r'^\s*clinica\s+',
+        r'^\s*de\s+vida\s+',
         r'^\s*espaço\s+terapêutico\s+',
         r'^\s*espaco\s+terapeutico\s+',
         r'^\s*espaço\s+',
@@ -254,12 +275,53 @@ def clean_company_name(name: str) -> str:
         r'^\s*psicóloga\s+',
         r'^\s*psicologa\s+',
         r'^\s*psicólogo\s+',
-        r'^\s*psicologo\s+'
+        r'^\s*psicologo\s+',
+        r'^\s*neuropsicóloga\s+',
+        r'^\s*neuropsicologa\s+',
+        r'^\s*neuropsicólogo\s+',
+        r'^\s*neuropsicologo\s+',
+        r'^\s*neuropsicologia\s+',
+        r'^\s*terapeuta\s+',
+        r'^\s*terapia\s+',
+        r'^\s*terapias\s+',
+        r'^\s*escanalista\s+',
+        r'^\s*hipnoterapeuta\s+',
+        r'^\s*hipnose\s+',
+        r'^\s*consteladora\s+',
+        r'^\s*constelador\s+',
+        r'^\s*coach\s+',
+        r'^\s*massoterapeuta\s+',
+        r'^\s*acupunturista\s+',
+        r'^\s*esteticista\s+',
+        r'^\s*musicoterapeuta\s+',
+        r'^\s*psicanalista\s+',
+        r'^\s*psicologia\s+',
+        r'^\s*cognitiva\s+',
+        r'^\s*comportamental\s+',
+        r'^\s*infantil\s+',
+        r'^\s*integradas\s+',
+        r'^\s*online\s+',
+        r'^\s*familiar\s+',
+        r'^\s*sistêmica\s+',
+        r'^\s*sistemica\s+',
+        r'^\s*sistêmicas\s+',
+        r'^\s*sistemicas\s+',
+        r'^\s*holística\s+',
+        r'^\s*holistica\s+',
+        r'^\s*holísticas\s+',
+        r'^\s*holisticas\s+',
+        r'^\s*integrativa\s+',
+        r'^\s*integrativas\s+'
     ]
     
     cleaned_result = candidate
-    for prefix in prefixes:
-        cleaned_result = re.sub(prefix, '', cleaned_result, flags=re.IGNORECASE).strip()
+    # Repeat until stable so stacked descriptors ("Hipnose Clínica ...",
+    # "Coach de Vida ...") are all stripped regardless of list order.
+    prev = None
+    while prev != cleaned_result:
+        prev = cleaned_result
+        for prefix in prefixes:
+            cleaned_result = re.sub(prefix, '', cleaned_result, flags=re.IGNORECASE).strip()
         
     # Suffixes
     suffixes = [
@@ -273,26 +335,86 @@ def clean_company_name(name: str) -> str:
         r'\s+psicologa\s*$',
         r'\s+psicólogo\s*$',
         r'\s+psicologo\s*$',
-        r'\s+psicologia\s*$'
+        r'\s+psicologia\s*$',
+        r'\s+neuropsicóloga\s*$',
+        r'\s+neuropsicologa\s*$',
+        r'\s+neuropsicólogo\s*$',
+        r'\s+neuropsicologo\s*$',
+        r'\s+terapeuta\s*$',
+        r'\s+escanalista\s*$',
+        r'\s+hipnoterapeuta\s*$',
+        r'\s+hipnose\s*$',
+        r'\s+consteladora\s*$',
+        r'\s+constelador\s*$',
+        r'\s+coach\s*$',
+        r'\s+massoterapeuta\s*$',
+        r'\s+acupunturista\s*$',
+        r'\s+esteticista\s*$',
+        r'\s+musicoterapeuta\s*$',
+        r'\s+psicanalista\s*$',
+        r'\s+clínica\s*$',
+        r'\s+clinica\s*$',
+        r'\s+cognitiva\s*$',
+        r'\s+comportamental\s*$',
+        r'\s+infantil\s*$',
+        r'\s+holistica\s*$',
+        r'\s+holística\s*$',
+        r'\s+integradas\s*$',
+        r'\s+online\s*$'
     ]
-    for suffix in suffixes:
-        cleaned_result = re.sub(suffix, '', cleaned_result, flags=re.IGNORECASE).strip()
+    prev = None
+    while prev != cleaned_result:
+        prev = cleaned_result
+        for suffix in suffixes:
+            cleaned_result = re.sub(suffix, '', cleaned_result, flags=re.IGNORECASE).strip()
         
     cleaned_result = re.sub(r'\s+', ' ', cleaned_result).strip()
     return cleaned_result
 
 def get_simplified_name(name: str) -> str:
-    """Extracts a simplified name (first and last name) after cleaning descriptors."""
+    """Extracts a simplified name (first name + surname) after cleaning descriptors.
+    Surname keeps Portuguese particles (de, da, do, dos, das), e.g. 'da Silva'."""
     cleaned = clean_company_name(name)
     if not cleaned:
         return ""
     words = cleaned.split()
-    if words:
-        if len(words) == 1:
-            return words[0].capitalize()
-        else:
-            return f"{words[0].capitalize()} {words[-1].capitalize()}"
-    return ""
+    # Drop specific descriptors that may survive cleaning (e.g. as suffixes).
+    drop_words = {
+        "integrados", "integrativas", "psicologia", "e",
+        "psicanalista", "psicanalise", "presencial", "psicoterapeuta",
+        "sexologa", "neuropsicologa", "neuropsicologia", "constelacoes",
+        "psicopedagoga", "organizacional", "terapias",
+        "individual", "infantojuvenil", "adolescentes", "psi",
+        "psicologico", "clinico", "ocupacional", "instituto",
+        "neurocognitivo", "casais", "avaliacao", "psicoterapia",
+        "constelacao", "infanto", "juvenil", "clinica", "infancia",
+        "adolescencia", "centro", "psicologa", "psicologo",
+    }
+    def _norm_word(w: str) -> str:
+        w = re.sub(r'[^\w]', '', w).lower()
+        return unicodedata.normalize('NFKD', w).encode('ASCII', 'ignore').decode('ASCII')
+    words = [w for w in words if _norm_word(w) not in drop_words]
+    # Drop stray trailing particles (e.g. "Ana de" -> "Ana")
+    particles = {"de", "da", "do", "dos", "das"}
+    while len(words) > 1 and words[-1].lower() in particles:
+        words.pop()
+    if not words:
+        return ""
+    if len(words) == 1:
+        return words[0].capitalize()
+    # Build surname: last word plus any particles directly before it
+    surname_parts = [words[-1]]
+    i = len(words) - 2
+    while i > 0 and words[i].lower() in particles:
+        surname_parts.insert(0, words[i].lower())
+        i -= 1
+    surname = " ".join(
+        w if w.lower() in particles else w.capitalize()
+        for w in surname_parts
+    )
+    # First name: skip leading particles (e.g. "de Vida ..." -> "Vida")
+    first = next((w for w in words[:i + 1] if w.lower() not in particles), words[0])
+    return f"{first.capitalize()} {surname}"
 
 def normalize_address(address_str: str, city_name: str = None) -> str:
     """Cleans up the street address string by removing CEP, City, State and normalizing spacing/case."""
@@ -485,7 +607,8 @@ def make_twenty_request(endpoint: str, method: str = "POST", payload: dict = Non
     
     headers = {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Haumea/1.0"
     }
     
     max_retries = 5
@@ -690,10 +813,12 @@ def register_json(json_file_path: Path):
         is_baixado = "baixada" in cnpj_situacao or "baixado" in cnpj_situacao
 
         # 1. Map and Create Company
+        # NOTE: cloud workspace has no cnpj/speciality fields and uses
+        # "emails" (not "eMail"). CNPJ details are preserved in
+        # initialObservations text via format_observations().
         company_payload = {
             "name": raw_name,
-            "simplifiedName": simplified_name,
-            "cnpj": "" if is_baixado else (lead.get("cnpj_cnpj") or "")
+            "simplifiedName": simplified_name
         }
         
         # Domain name (ignoring social media links)
@@ -740,7 +865,7 @@ def register_json(json_file_path: Path):
         if not email:
             email = lead.get("cnpj_email") or ""
         if email:
-            company_payload["eMail"] = {
+            company_payload["emails"] = {
                 "primaryEmail": email
             }
             
@@ -756,10 +881,6 @@ def register_json(json_file_path: Path):
         market = map_market(lead.get("maps_category"))
         if market:
             company_payload["market"] = market
-            
-        speciality = lead.get("cnpj_cnae_descricao") or lead.get("maps_category") or ""
-        if speciality:
-            company_payload["speciality"] = speciality[:255]
 
         status, response_data = make_twenty_request("companies", "POST", company_payload, token, base_url)
         if status not in (200, 201):

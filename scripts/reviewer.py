@@ -29,7 +29,7 @@ def detect_csv_format(file_path: Path):
             sample = infile.read(2048)
             infile.seek(0)
             try:
-                dialect = csv.Sniffer().sniff(sample)
+                dialect = csv.Sniffer().sniff(sample, delimiters=[',', ';', '\t'])
             except Exception:
                 dialect = 'excel'
             return encoding, dialect
@@ -679,7 +679,14 @@ def review_csv(input_file: Path, screenshot_dir: Path = None, output_file: Path 
         reader = csv.DictReader(f, fieldnames=fieldnames, dialect=dialect)
         next(reader) # skip header
         for r in reader:
-            cleaned_r = {k.strip().lstrip('\ufeff'): (v if v is not None else "") for k, v in r.items()}
+            extras = r.get(None)
+            if extras:
+                print(f"Warning: skipping {len(extras)} extra column(s) in row for '{r.get('maps_title', '?')}'", file=sys.stderr)
+            cleaned_r = {
+                k.strip().lstrip('\ufeff'): (v if v is not None else "")
+                for k, v in r.items()
+                if k is not None
+            }
             rows.append(cleaned_r)
 
     # Find Chromium/Chrome
