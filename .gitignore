@@ -46,3 +46,6 @@ google-maps-scraper*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Estado das cargas do register
+*.registered.json

@@ -1,3 +1,11 @@
+"""Registro de leads do Haumea no CRM Antessala (API v1).
+
+A API v1 trabalha com uma única entidade, a oportunidade, aceita escrita
+parcial por PUT e criação em lote por POST. Este módulo converte o JSON do
+Haumea para esse formato, envia os leads em lotes idempotentes e oferece as
+ferramentas auxiliares de conferência de duplicados e normalização de nomes.
+"""
+
 import json
 import sys
 import urllib.request
@@ -7,6 +15,8 @@ import re
 import os
 import time
 import unicodedata
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 def load_env():
@@ -28,18 +38,19 @@ def load_env():
                             # Strip quotes if present
                             if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
                                 val = val[1:-1]
-                            os.environ[key] = val
+                            # Variáveis já exportadas no ambiente têm prioridade.
+                            os.environ.setdefault(key, val)
                 break
             except Exception:
                 pass
 
 def map_market(category: str) -> str:
-    """Maps Google Maps scraper categories to Twenty's market enum values."""
+    """Maps Google Maps scraper categories to the Antessala market enum values."""
     if not category:
         return None
     cat = category.lower().strip()
     
-    # Strictly allow only these enums (from user's Twenty CRM schema)
+    # Strictly allow only these enums (from the Antessala market schema)
     enum_values = [
         "PSYCHOLOGIST", "RESTAURANT", "MECHANICAL", "LAWYER", "ACCOUNTING",
         "DENTIST", "ARCHITECT", "REAL_ESTATE", "SOLAR_ENERGY", "PLASTIC_SURGEON",
@@ -57,7 +68,7 @@ def map_market(category: str) -> str:
         "PEDIATRICIAN", "PHYSICAL_THERAPY_CLINIC", "PILATES_STUDIO", "THERAPIST"
     ]
     
-    # Common mappings (Português/Inglês -> Twenty Enum)
+    # Common mappings (Português/Inglês -> Antessala Enum)
     mappings = {
         "psychologist": "PSYCHOLOGIST",
         "psicólogo": "PSYCHOLOGIST",
@@ -100,7 +111,103 @@ def map_market(category: str) -> str:
         
         "real estate": "REAL_ESTATE",
         "imobiliária": "REAL_ESTATE",
+        "imobiliaria": "REAL_ESTATE",
         "corretor": "REAL_ESTATE",
+
+        # Common Brazilian categories
+        "padaria": "BAKERY",
+        "panificadora": "BAKERY",
+        "confeitaria": "BAKERY",
+        "barbearia": "BARBERSHOP",
+        "barber": "BARBERSHOP",
+        "salão de beleza": "BEAUTICIAN",
+        "salao de beleza": "BEAUTICIAN",
+        "cabeleireiro": "BEAUTICIAN",
+        "cabeleireira": "BEAUTICIAN",
+        "esteticista": "BEAUTICIAN",
+        "estética": "BEAUTICIAN",
+        "estetica": "BEAUTICIAN",
+        "clínica de estética": "BEAUTICIAN",
+        "clinica de estetica": "BEAUTICIAN",
+        "academia": "GYM",
+        "personal trainer": "PERSONAL_TRAINER",
+        "veterinário": "VETERINARIAN",
+        "veterinaria": "VETERINARIAN",
+        "veterinária": "VETERINARIAN",
+        "pet shop": "VETERINARIAN",
+        "petshop": "VETERINARIAN",
+        "oficina mecânica": "MECHANICAL",
+        "oficina mecanica": "MECHANICAL",
+        "advocacia": "LAWYER",
+        "escritório de advocacia": "LAWYER",
+        "escritorio de advocacia": "LAWYER",
+        "construtora": "CONSTRUCTION",
+        "construção civil": "CONSTRUCTION",
+        "construcao civil": "CONSTRUCTION",
+        "odontologia": "DENTIST",
+        "clínica odontológica": "DENTIST",
+        "clinica odontologica": "DENTIST",
+        "fisioterapia": "PHYSICAL_THERAPY_CLINIC",
+        "clínica de fisioterapia": "PHYSICAL_THERAPY_CLINIC",
+        "clinica de fisioterapia": "PHYSICAL_THERAPY_CLINIC",
+        "pilates": "PILATES_STUDIO",
+        "quiroprata": "CHIROPRACTOR",
+        "quiropraxia": "CHIROPRACTOR",
+        "dermatologista": "DERMATOLOGIST",
+        "tricologista": "TRICHOLOGIST",
+        "endocrinologista": "ENDOCRINOLOGIST",
+        "proctologista": "PROCTOLOGIST",
+        "cirurgião plástico": "PLASTIC_SURGEON",
+        "cirurgiao plastico": "PLASTIC_SURGEON",
+        "designer de interiores": "INTERIOR_DESIGNER",
+        "paisagismo": "LANDSCAPING",
+        "telhados": "ROOFING",
+        "encanador": "PLUMBER",
+        "eletricista": "ELECTRICIAN",
+        "consultoria": "CONSULTING",
+        "assessor financeiro": "FINANCIAL_ADVISOR",
+        "corretor de seguros": "INSURANCE_BROKER",
+        "agência de viagens": "TRAVEL_AGENCY",
+        "agencia de viagens": "TRAVEL_AGENCY",
+        "chaveiro": "LOCKSMITH",
+        "dedetização": "PEST_CONTROL",
+        "dedetizacao": "PEST_CONTROL",
+        "energia solar": "SOLAR_ENERGY",
+        "ar-condicionado": "HVAC",
+        "ar condicionado": "HVAC",
+        "limpeza": "CLEANING_SERVICE",
+        "mudança": "MOVING_COMPANY",
+        "mudanca": "MOVING_COMPANY",
+        "segurança": "SECURITY_COMPANY",
+        "seguranca": "SECURITY_COMPANY",
+        "logística": "LOGISTICS",
+        "logistica": "LOGISTICS",
+        "locadora": "CAR_RENTAL",
+        "locação de veículos": "CAR_RENTAL",
+        "locacao de veiculos": "CAR_RENTAL",
+        "guincho": "TOWING_SERVICE",
+        "fotógrafo": "PHOTOGRAPHER",
+        "fotografo": "PHOTOGRAPHER",
+        "fotógrafa": "PHOTOGRAPHER",
+        "fotografa": "PHOTOGRAPHER",
+        "ótica": "OPTOMETRIST",
+        "otica": "OPTOMETRIST",
+        "optometrista": "OPTOMETRIST",
+        "creche": "DAYCARE",
+        "spa": "SPA",
+        "tatuagem": "TATTOO_PARLOR",
+        "estúdio de tatuagem": "TATTOO_PARLOR",
+        "estudio de tatuagem": "TATTOO_PARLOR",
+        "buffet": "CATERING",
+        "assessoria de casamento": "WEDDING_PLANNER",
+        "planejador de eventos": "EVENT_PLANNER",
+        "professor particular": "PRIVATE_TUTOR",
+        "terapeuta": "THERAPIST",
+        "loja de orgânicos": "ORGANIC_FOOD_STORE",
+        "loja de organicos": "ORGANIC_FOOD_STORE",
+        "loja maternal": "MATERNITY_STORE",
+        "genealogista": "GENEALOGIST",
+        "transplante capilar": "HAIR_REPLACEMENT_SERVICE",
 
         # Medical / Health / Nutrition mappings
         "nutritionist": "NUTRITIONIST",
@@ -448,6 +555,9 @@ def normalize_address(address_str: str, city_name: str = None) -> str:
         else:
             if w.isdigit():
                 title_words.append(w)
+            elif len(w_clean) == 2 and w_clean.upper() in _UFS:
+                # Preserva siglas de estado (RS, SP, MG...) em maiúsculas.
+                title_words.append(w.upper())
             else:
                 if w.endswith(','):
                     title_words.append(w[:-1].capitalize() + ',')
@@ -459,7 +569,7 @@ def normalize_address(address_str: str, city_name: str = None) -> str:
     return street_normalized
 
 def map_stage(review_score: str) -> str:
-    """Maps the lead qualification score to Twenty's opportunity stage. Always returns LEAD."""
+    """Maps the lead qualification score to the Antessala funnel stage. Always returns LEAD."""
     return "LEAD"
 
 def extract_socios(socios_str: str) -> list:
@@ -499,10 +609,17 @@ def format_observations(lead: dict) -> str:
     paragraphs = []
     
     # 1. Google Maps Name
-    orig_name = lead.get("maps_title", "").strip()
+    orig_name = (lead.get("maps_title") or "").strip()
     if orig_name:
         paragraphs.append(f"Lead coletado originalmente no Google Maps sob o nome '{orig_name}'.")
-        
+
+    # 1.1 Endereço (o Antessala não tem campo estruturado para endereço)
+    raw_address = (lead.get("maps_address") or lead.get("cnpj_endereco") or "").strip()
+    if raw_address:
+        address = normalize_address(raw_address, lead.get("maps_city"))
+        if address:
+            paragraphs.append(f"Endereço registrado: {address}.")
+
     # 2. Review checklist and score
     score = lead.get("review_score")
     if score:
@@ -600,533 +717,830 @@ def format_observations(lead: dict) -> str:
         
     return "\n\n".join(paragraphs)
 
-def make_twenty_request(endpoint: str, method: str = "POST", payload: dict = None, token: str = None, base_url: str = None) -> tuple:
-    """Helper to perform requests against the Twenty REST API using urllib."""
-    url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
-    req_data = json.dumps(payload).encode("utf-8") if payload else None
-    
+# ---------------------------------------------------------------------------
+# Integração com o CRM Antessala (API v1)
+# ---------------------------------------------------------------------------
+# A API v1 tem uma única entidade de contato: a oportunidade (lead). Não
+# existem empresas nem pessoas separadas, não existe PATCH e não existe rota
+# de exclusão. Tudo o que este módulo grava passa por POST/PUT em
+# /api/v1/opportunities. Referência: documentação da API v1 do Antessala.
+# ---------------------------------------------------------------------------
+
+API_PREFIX = "/api/v1"
+DEFAULT_BASE_URL = "https://antessala.panemiko.com"
+DEFAULT_VALUE_CENTS = 130000  # R$ 1.300,00, valor padrão histórico do Haumea
+BATCH_MAX_ITEMS = 1000        # limite de itens por lote da API
+BATCH_MAX_BYTES = 7_500_000   # o limite da API é 8 MB; mantemos margem
+NOTES_MAX_CHARS = 10_000      # limite do campo notes
+REQUEST_TIMEOUT = 60
+MAX_RETRIES = 5
+
+_UFS = {
+    "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS",
+    "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC",
+    "SP", "SE", "TO",
+}
+
+_STATE_NAME_TO_UF = {
+    "acre": "AC",
+    "alagoas": "AL",
+    "amapa": "AP",
+    "amazonas": "AM",
+    "bahia": "BA",
+    "ceara": "CE",
+    "distrito federal": "DF",
+    "espirito santo": "ES",
+    "goias": "GO",
+    "maranhao": "MA",
+    "mato grosso": "MT",
+    "mato grosso do sul": "MS",
+    "minas gerais": "MG",
+    "para": "PA",
+    "paraiba": "PB",
+    "parana": "PR",
+    "pernambuco": "PE",
+    "piaui": "PI",
+    "rio de janeiro": "RJ",
+    "rio grande do norte": "RN",
+    "rio grande do sul": "RS",
+    "rondonia": "RO",
+    "roraima": "RR",
+    "santa catarina": "SC",
+    "sao paulo": "SP",
+    "sergipe": "SE",
+    "tocantins": "TO",
+}
+
+
+def _normalize_key(value: str) -> str:
+    """Normaliza texto para comparação: sem acento, minúsculo e sem pontuação."""
+    if not value:
+        return ""
+    normalized = unicodedata.normalize("NFKD", str(value)).encode("ASCII", "ignore").decode("ASCII")
+    return re.sub(r"[^a-z0-9]+", " ", normalized.lower()).strip()
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _short_text(value, max_len: int):
+    """Colapsa espaços e limita o tamanho. Vazio vira None, como a API espera."""
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    if not text:
+        return None
+    return text[:max_len]
+
+
+def _digits(value) -> str:
+    if not value:
+        return ""
+    return "".join(char for char in str(value) if char.isdigit())
+
+
+def _normalize_state(value):
+    """Aceita UF ou nome por extenso e devolve a UF de duas letras."""
+    text = _short_text(value, 40)
+    if not text:
+        return None
+    upper = text.upper()
+    if upper in _UFS:
+        return upper
+    key = re.sub(r"^state of\s+", "", text, flags=re.IGNORECASE)
+    return _STATE_NAME_TO_UF.get(_normalize_key(key), text[:40])
+
+
+def _city_state_from_address(address: str) -> tuple:
+    """Tenta extrair cidade e UF de um endereço no formato do Google Maps."""
+    if not address:
+        return "", ""
+    for part in reversed(str(address).split(",")):
+        left, separator, right = part.rpartition("-")
+        if not separator:
+            continue
+        candidate = right.strip().upper()
+        if candidate in _UFS:
+            return left.strip(), candidate
+    return "", ""
+
+
+def _first_email(value):
+    """Pega o primeiro e-mail válido de uma lista separada por vírgula ou ponto e vírgula."""
+    if not value:
+        return None
+    for candidate in re.split(r"[,;\s]+", str(value)):
+        candidate = candidate.strip().lower()
+        if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", candidate):
+            return candidate[:320]
+    return None
+
+
+def _with_scheme(url: str) -> str:
+    if not url:
+        return url
+    return url if re.match(r"^https?://", url, re.IGNORECASE) else f"https://{url}"
+
+
+def _lead_id(lead: dict, name: str, city: str, phone: str) -> str:
+    """Gera um UUID determinístico para servir de chave de idempotência.
+
+    Reenviar o mesmo lead gera o mesmo id e a API responde com conflito em vez
+    de duplicar o registro. A prioridade é CNPJ, depois telefone e, por fim,
+    nome + cidade.
+    """
+    cnpj = _digits(lead.get("cnpj_cnpj"))
+    phone_digits = _digits(phone)
+    if len(cnpj) == 14:
+        key = f"cnpj:{cnpj}"
+    elif len(phone_digits) >= 10:
+        key = f"telefone:{phone_digits}"
+    else:
+        key = f"nome:{_normalize_key(name)}|{_normalize_key(city or '')}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"haumea-antessala:{key}"))
+
+
+def _response_json(body: str):
+    if not body:
+        return {}
+    try:
+        return json.loads(body)
+    except Exception:
+        return body
+
+
+def _get_header(headers: dict, name: str):
+    if not headers:
+        return None
+    target = name.lower()
+    for key, value in headers.items():
+        if str(key).lower() == target:
+            return value
+    return None
+
+
+def _build_url(base_url: str, endpoint: str, query: dict = None) -> str:
+    url = f"{base_url.rstrip('/')}{API_PREFIX}/{endpoint.lstrip('/')}"
+    if query:
+        clean_query = {key: value for key, value in query.items() if value is not None}
+        if clean_query:
+            url = f"{url}?{urllib.parse.urlencode(clean_query)}"
+    return url
+
+
+def make_api_request(endpoint: str, method: str = "GET", payload: dict = None,
+                     query: dict = None, token: str = None, base_url: str = None) -> tuple:
+    """Executa uma requisição na API v1 do Antessala.
+
+    Devolve (status, corpo, cabeçalhos). Repete apenas o que é seguro repetir:
+    429 respeitando o Retry-After, 5xx com espera exponencial e falhas de
+    conexão. Erros de validação, autenticação e permissão não são repetidos.
+    """
+    base_url = base_url or DEFAULT_BASE_URL
+    url = _build_url(base_url, endpoint, query)
+    data = None
+
     headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Haumea/1.0"
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Haumea/1.0",
     }
-    
-    max_retries = 5
-    retry_delay = 5.0  # seconds
-    
-    for attempt in range(max_retries):
-        req = urllib.request.Request(
-            url,
-            data=req_data,
-            headers=headers,
-            method=method
-        )
-        
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    delay = 2.0
+    for attempt in range(1, MAX_RETRIES + 1):
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req) as response:
-                status = response.status
-                body_str = response.read().decode("utf-8", errors="ignore")
-                try:
-                    data = json.loads(body_str)
-                except Exception:
-                    data = body_str
-                
-                # Introduce a small delay after a successful request to space them out
-                time.sleep(0.65)
-                
-                return status, data
-        except urllib.error.HTTPError as e:
-            error_body = ""
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+                body = response.read().decode("utf-8", errors="replace")
+                return response.status, _response_json(body), dict(response.headers)
+        except urllib.error.HTTPError as error:
             try:
-                error_body = e.read().decode("utf-8", errors="ignore")
+                body = error.read().decode("utf-8", errors="replace")
             except Exception:
-                pass
-            
-            if e.code == 429:
-                print(f"  -> Rate limit hit (429) on attempt {attempt + 1}/{max_retries}. Waiting {retry_delay} seconds before retrying...", file=sys.stderr)
-                time.sleep(retry_delay)
-                retry_delay *= 1.5
+                body = ""
+            status = error.code
+            response_headers = dict(error.headers) if error.headers else {}
+
+            if status == 429 and attempt < MAX_RETRIES:
+                retry_after = _get_header(response_headers, "retry-after")
+                try:
+                    wait = float(retry_after)
+                except (TypeError, ValueError):
+                    wait = 5.0
+                print(f"  -> Limite de requisições atingido (429). Aguardando {wait:.0f}s...", file=sys.stderr)
+                time.sleep(wait)
                 continue
-                
-            return e.code, error_body
-        except Exception as e:
-            if attempt < max_retries - 1:
-                print(f"  -> Connection error: {e}. Retrying in {retry_delay} seconds...", file=sys.stderr)
-                time.sleep(retry_delay)
-                retry_delay *= 1.5
+
+            if status in (500, 502, 503, 504) and attempt < MAX_RETRIES:
+                print(f"  -> Falha temporária no servidor ({status}). Nova tentativa em {delay:.0f}s...", file=sys.stderr)
+                time.sleep(delay)
+                delay *= 2
                 continue
-            return 0, str(e)
-            
-    return 429, "Rate limit retry limit exceeded"
+
+            return status, _response_json(body), response_headers
+        except Exception as error:
+            if attempt < MAX_RETRIES:
+                print(f"  -> Erro de conexão: {error}. Nova tentativa em {delay:.0f}s...", file=sys.stderr)
+                time.sleep(delay)
+                delay *= 2
+                continue
+            return 0, {"error": {"code": "connection_error", "message": str(error)}}, {}
+
+    return 0, {"error": {"code": "retry_exhausted", "message": "Limite de tentativas atingido."}}, {}
 
 
-def check_duplicates():
-    """Checks for duplicate records in the CRM by WhatsApp and CNPJ."""
-    # Load environment variables from .env
+def _print_api_error(label: str, status: int, data, headers: dict = None) -> None:
+    error = data.get("error", {}) if isinstance(data, dict) else {}
+    code = error.get("code") or "unknown"
+    message = error.get("message") or (data if isinstance(data, str) else "")
+    print(f"  -> {label}: HTTP {status} ({code}) {message}", file=sys.stderr)
+    details = error.get("details")
+    if details:
+        print(f"     detalhes: {json.dumps(details, ensure_ascii=False)}", file=sys.stderr)
+    request_id = _get_header(headers or {}, "x-request-id")
+    if request_id:
+        print(f"     x-request-id: {request_id}", file=sys.stderr)
+
+
+def probe_health(base_url: str = DEFAULT_BASE_URL) -> bool:
+    """Consulta a sonda pública /api/health antes de qualquer carga."""
+    url = f"{base_url.rstrip('/')}/api/health"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            data = _response_json(body)
+            if response.status == 200 and isinstance(data, dict) and data.get("status") == "ok":
+                print(f"  Saúde da API: ok ({data.get('opportunities', '?')} leads, {data.get('migrations', '?')} migrações)")
+                return True
+            print(f"  -> A sonda de saúde respondeu HTTP {response.status}: {body}", file=sys.stderr)
+            return False
+    except urllib.error.HTTPError as error:
+        body = ""
+        try:
+            body = error.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        print(f"  -> A sonda de saúde respondeu HTTP {error.code}: {body}", file=sys.stderr)
+        return False
+    except Exception as error:
+        print(f"  -> Não foi possível consultar a sonda de saúde: {error}", file=sys.stderr)
+        return False
+
+
+def load_api_config() -> tuple:
+    """Lê token e URL base do Antessala do ambiente ou do .env."""
     load_env()
+    token = os.environ.get("ANTESSALA_TOKEN")
+    base_url = os.environ.get("ANTESSALA_API_URL") or DEFAULT_BASE_URL
+    return token, base_url.rstrip("/")
 
-    # Load API configuration from environment variables
-    token = os.environ.get("TWENTY_API_TOKEN")
-    base_url = os.environ.get("TWENTY_API_URL", "http://localhost:4000/rest")
-    
-    if not token or token == "your_token_here":
-        print("Error: TWENTY_API_TOKEN environment variable is not set correctly.", file=sys.stderr)
-        print("Please set it in the .env file in the project root:", file=sys.stderr)
-        sys.exit(1)
 
-    print("\n--- CHECKING FOR DUPLICATES IN TWENTY CRM ---")
-    print(f"API URL: {base_url}")
-    print("--------------------------------------------\n")
+def lead_to_opportunity(lead: dict, marker: str = None,
+                        value_cents: int = None) -> tuple:
+    """Converte um lead do JSON do Haumea em um item da API do Antessala.
 
-    print("Fetching companies from CRM...")
-    all_companies = []
-    starting_after = None
-    while True:
-        query_params = {
-            "limit": 60,
-        }
-        if starting_after:
-            query_params["starting_after"] = starting_after
-            
-        endpoint = f"companies?{urllib.parse.urlencode(query_params)}"
-        status, response = make_twenty_request(endpoint, "GET", token=token, base_url=base_url)
-        if status != 200:
-            print(f"Error: Failed to fetch companies: Status {status}. Response: {response}", file=sys.stderr)
-            return
-            
-        companies_chunk = response.get("data", {}).get("companies", [])
-        if not companies_chunk:
-            break
-        all_companies.extend(companies_chunk)
-        
-        page_info = response.get("pageInfo", {})
-        if page_info.get("hasNextPage") and page_info.get("endCursor"):
-            starting_after = page_info.get("endCursor")
+    Devolve (payload, None) quando o lead é válido ou (None, motivo) quando
+    falta o campo obrigatório `name`.
+    """
+    raw_name = lead.get("maps_title") or lead.get("name") or ""
+    name = _short_text(raw_name, 200)
+    if not name or len(name) < 2:
+        return None, "nome ausente ou com menos de 2 caracteres"
+
+    simplified = _short_text(get_simplified_name(name), 200) or name
+    city = _short_text(lead.get("maps_city"), 120)
+    state = _normalize_state(lead.get("maps_state"))
+
+    address = lead.get("maps_address") or lead.get("cnpj_endereco") or ""
+    if not city or not state:
+        address_city, address_state = _city_state_from_address(address)
+        city = city or _short_text(address_city, 120)
+        state = state or _normalize_state(address_state)
+
+    phone = _short_text(lead.get("maps_phone") or lead.get("cnpj_telefone"), 40)
+    email = _first_email(lead.get("maps_emails") or lead.get("cnpj_email"))
+
+    website = _short_text(lead.get("maps_website"), 500)
+    instagram = _short_text(lead.get("maps_instagram"), 500)
+    current_website = None
+    if website:
+        if is_social_media(website):
+            if "instagram.com" in website.lower() and not instagram:
+                instagram = website[:500]
         else:
+            current_website = _with_scheme(website)[:500]
+
+    notes = format_observations(lead)
+
+    if value_cents is None:
+        raw_value = lead.get("value_cents", lead.get("valueCents"))
+        try:
+            value_cents = int(raw_value) if raw_value not in (None, "") else DEFAULT_VALUE_CENTS
+        except (TypeError, ValueError):
+            value_cents = DEFAULT_VALUE_CENTS
+    value_cents = max(0, int(value_cents))
+
+    created_at = _now_iso()
+    payload_id = _lead_id(lead, name, city, phone)
+
+    if marker:
+        tag = f"[{marker}]"
+        name = _short_text(f"{tag} {name}", 200)
+        simplified = _short_text(f"{tag} {simplified}", 200) or name
+        notes = f"{tag} Lead de teste criado pelo Haumea em {created_at}. Pode excluir.\n\n{notes or ''}".rstrip()
+
+    if notes:
+        notes = notes[:NOTES_MAX_CHARS]
+    else:
+        notes = None
+
+    payload = {
+        "id": payload_id,
+        "name": name,
+        "simplifiedName": simplified,
+        "city": city,
+        "state": state,
+        "phone": phone,
+        "email": email,
+        "instagram": instagram,
+        "currentWebsite": current_website,
+        "market": map_market(lead.get("maps_category")),
+        "status": "LEAD",
+        "messageStage": "NO_CONTACT",
+        "leadCreatedAt": created_at,
+        "valueCents": value_cents,
+        "notes": notes,
+    }
+    return payload, None
+
+
+def prepare_opportunities(leads: list, marker: str = None) -> tuple:
+    """Converte e valida todos os leads antes de enviar qualquer coisa."""
+    prepared = []
+    skipped = []
+    seen_ids = {}
+
+    for index, lead in enumerate(leads, 1):
+        if not isinstance(lead, dict):
+            skipped.append((index, None, "o item não é um objeto JSON"))
+            continue
+
+        payload, reason = lead_to_opportunity(lead, marker=marker)
+        if payload is None:
+            skipped.append((index, lead.get("maps_title"), reason))
+            continue
+
+        if payload["id"] in seen_ids:
+            skipped.append((
+                index,
+                payload["name"],
+                f"id repetido no arquivo (igual ao item {seen_ids[payload['id']]})",
+            ))
+            continue
+
+        seen_ids[payload["id"]] = index
+        prepared.append(payload)
+
+    return prepared, skipped
+
+
+def _chunks(items: list, max_items: int = BATCH_MAX_ITEMS, max_bytes: int = BATCH_MAX_BYTES):
+    """Divide os itens em lotes que respeitam o limite de itens e de corpo."""
+    chunk = []
+    chunk_bytes = 0
+    for item in items:
+        item_bytes = len(json.dumps(item, ensure_ascii=False).encode("utf-8"))
+        if chunk and (len(chunk) >= max_items or chunk_bytes + item_bytes > max_bytes):
+            yield chunk
+            chunk = []
+            chunk_bytes = 0
+        chunk.append(item)
+        chunk_bytes += item_bytes
+    if chunk:
+        yield chunk
+
+
+def post_batch(items: list, token: str, base_url: str) -> tuple:
+    """Envia um lote e trata conflito de id removendo apenas os itens repetidos.
+
+    Devolve (criados, já_existentes, falhados, status, corpo_do_erro).
+    O lote da API é atômico: um item inválido derruba o lote inteiro.
+    """
+    pending = list(items)
+    created = []
+    conflicts = []
+
+    while pending:
+        status, data, headers = make_api_request(
+            "opportunities", "POST", {"items": pending}, token=token, base_url=base_url
+        )
+
+        if status in (200, 201):
+            if isinstance(data, dict):
+                created.extend(data.get("data") or [])
+            return created, conflicts, [], status, None
+
+        if status == 400 and isinstance(data, dict):
+            details = data.get("error", {}).get("details") or []
+            conflict_indexes = set()
+            for detail in details:
+                match = re.match(r"corpo\.items\.(\d+)\.id$", str(detail.get("campo", "")))
+                if match:
+                    conflict_indexes.add(int(match.group(1)))
+
+            if conflict_indexes:
+                for index in sorted(conflict_indexes):
+                    if 0 <= index < len(pending):
+                        conflicts.append(pending[index])
+                pending = [item for index, item in enumerate(pending) if index not in conflict_indexes]
+                if pending:
+                    print(f"  -> {len(conflict_indexes)} lead(s) já existem no CRM e foram pulados; reenviando o restante.")
+                else:
+                    print(f"  -> {len(conflict_indexes)} lead(s) já existem no CRM; nada novo para enviar.")
+                continue
+
+            _print_api_error("Lote rejeitado", status, data, headers)
+            return created, conflicts, pending, status, data
+
+        if status == 413 and len(pending) > 1:
+            middle = len(pending) // 2
+            print(f"  -> Corpo grande demais (413); dividindo o lote em {middle} e {len(pending) - middle} itens.")
+            first = post_batch(pending[:middle], token, base_url)
+            second = post_batch(pending[middle:], token, base_url)
+            merged_status = first[3] if first[3] not in (200, 201) else second[3]
+            return (
+                first[0] + second[0],
+                first[1] + second[1],
+                first[2] + second[2],
+                merged_status,
+                first[4] or second[4],
+            )
+
+        _print_api_error("Falha no lote", status, data, headers)
+        return created, conflicts, pending, status, data
+
+    return created, conflicts, [], 201, None
+
+
+def save_registration_state(json_file: Path, base_url: str, marker: str,
+                            created: list, conflicts: list) -> Path:
+    """Grava ao lado do JSON os ids criados, para conferência e idempotência."""
+    output_path = json_file.with_suffix(".registered.json")
+    payload = {
+        "baseUrl": base_url,
+        "registeredAt": _now_iso(),
+        "marker": marker,
+        "created": [
+            {
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "simplifiedName": item.get("simplifiedName"),
+            }
+            for item in created
+        ],
+        "skippedExisting": [
+            {"id": item.get("id"), "name": item.get("name")}
+            for item in conflicts
+        ],
+    }
+    try:
+        with open(output_path, "w", encoding="utf-8") as file_handle:
+            json.dump(payload, file_handle, ensure_ascii=False, indent=2)
+        print(f"Estado da carga salvo em: {output_path}")
+    except Exception as error:
+        print(f"  -> Aviso: não foi possível salvar o estado da carga: {error}", file=sys.stderr)
+    return output_path
+
+
+def fetch_all_opportunities(token: str, base_url: str) -> list:
+    """Percorre todas as páginas de leads não arquivados."""
+    everyone = []
+    page = 1
+    while True:
+        status, data, headers = make_api_request(
+            "opportunities",
+            query={"page": page, "pageSize": 1000, "sort": "leadCreatedAt", "dir": "asc"},
+            token=token,
+            base_url=base_url,
+        )
+        if status == 403:
+            print("  -> Este token não tem escopo de leitura, então não é possível listar os leads.", file=sys.stderr)
+            print("     Use um token com escopo read ou full para esta operação.", file=sys.stderr)
+            return everyone
+        if status != 200 or not isinstance(data, dict):
+            _print_api_error("Falha ao listar leads", status, data, headers)
+            return everyone
+
+        chunk = data.get("data") or []
+        everyone.extend(chunk)
+        page_count = data.get("pageCount") or 1
+        print(f"  ... página {page}/{page_count} ({len(chunk)} leads)")
+        if page >= page_count or not chunk:
             break
+        page += 1
 
-    print(f"Fetched {len(all_companies)} companies to verify.")
+    return everyone
 
-    def clean_digits(val: str) -> str:
-        if not val:
-            return ""
-        return "".join(c for c in val if c.isdigit())
 
-    by_whatsapp = {}
-    by_cnpj = {}
+def check_duplicates(token: str = None, base_url: str = None) -> bool:
+    """Procura leads repetidos por telefone e por nome + cidade."""
+    if not token or not base_url:
+        token, base_url = load_api_config()
 
-    for comp in all_companies:
-        comp_id = comp.get("id")
-        comp_name = comp.get("name") or "Unnamed"
-        
-        # WhatsApp check
-        whatsapp_data = comp.get("whatsapp")
-        if isinstance(whatsapp_data, dict):
-            phone = clean_digits(whatsapp_data.get("primaryPhoneNumber"))
-            if phone:
-                by_whatsapp.setdefault(phone, []).append((comp_name, comp_id))
-                
-        # CNPJ check
-        cnpj = clean_digits(comp.get("cnpj"))
-        if cnpj:
-            by_cnpj.setdefault(cnpj, []).append((comp_name, comp_id))
+    if not token:
+        print("Erro: ANTESSALA_TOKEN não está configurado.", file=sys.stderr)
+        return False
+
+    print("\n--- VERIFICANDO LEADS DUPLICADOS NO ANTESSALA ---")
+    print(f"API URL: {base_url}")
+    print("-------------------------------------------------\n")
+
+    opportunities = fetch_all_opportunities(token, base_url)
+    if not opportunities:
+        print("Nenhum lead pôde ser lido (ou a base está vazia).")
+        return False
+
+    print(f"Total de leads lidos: {len(opportunities)}")
+
+    by_phone = {}
+    by_name = {}
+
+    for opportunity in opportunities:
+        phone = _digits(opportunity.get("phone"))
+        if len(phone) >= 10:
+            by_phone.setdefault(phone, []).append(opportunity)
+
+        name_key = _normalize_key(opportunity.get("name"))
+        city_key = _normalize_key(opportunity.get("city"))
+        if name_key:
+            by_name.setdefault(f"{name_key}|{city_key}", []).append(opportunity)
 
     has_duplicates = False
-    
-    # 1. WhatsApp Duplicates
-    whatsapp_duplicates = {k: v for k, v in by_whatsapp.items() if len(v) > 1}
-    if whatsapp_duplicates:
+    printed_groups = 0
+
+    phone_duplicates = {key: value for key, value in by_phone.items() if len(value) > 1}
+    if phone_duplicates:
         has_duplicates = True
-        print("\n[WARNING] Duplicate companies by WhatsApp found in CRM:")
-        for phone, companies in whatsapp_duplicates.items():
-            print(f"  WhatsApp: {phone}")
-            for name, comp_id in companies:
-                print(f"    - {name} (ID: {comp_id})")
-                
-    # 2. CNPJ Duplicates
-    cnpj_duplicates = {k: v for k, v in by_cnpj.items() if len(v) > 1}
-    if cnpj_duplicates:
+        print("\n[AVISO] Leads repetidos por telefone:")
+        for phone, group in phone_duplicates.items():
+            if printed_groups >= 30:
+                print("  ... saída limitada a 30 grupos.")
+                break
+            print(f"  Telefone: {phone}")
+            for opportunity in group:
+                print(f"    - {opportunity.get('name')} (ID: {opportunity.get('id')})")
+            printed_groups += 1
+
+    printed_groups = 0
+    name_duplicates = {key: value for key, value in by_name.items() if len(value) > 1}
+    if name_duplicates:
         has_duplicates = True
-        print("\n[WARNING] Duplicate companies by CNPJ found in CRM:")
-        for cnpj, companies in cnpj_duplicates.items():
-            formatted_cnpj = cnpj
-            if len(cnpj) == 14:
-                formatted_cnpj = f"{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}"
-            print(f"  CNPJ: {formatted_cnpj}")
-            for name, comp_id in companies:
-                print(f"    - {name} (ID: {comp_id})")
+        print("\n[AVISO] Leads repetidos por nome + cidade:")
+        for key, group in name_duplicates.items():
+            if printed_groups >= 30:
+                print("  ... saída limitada a 30 grupos.")
+                break
+            label = key.split("|")[0].title()
+            print(f"  Nome: {label}")
+            for opportunity in group:
+                print(f"    - {opportunity.get('name')} (ID: {opportunity.get('id')})")
+            printed_groups += 1
 
     if not has_duplicates:
-        print("\nNo duplicate companies found in CRM.")
-    
-    print("\n--------------------------------------------")
-    print("Duplicate check complete.")
-    print("--------------------------------------------\n")
+        print("\nNenhum lead duplicado encontrado.")
+
+    print("\n-------------------------------------------------")
+    print("Verificação de duplicados concluída.")
+    print("-------------------------------------------------\n")
+    return has_duplicates
 
 
-def register_json(json_file_path: Path):
-    """Reads qualified leads from JSON and creates Company, Person, and Opportunity records in Twenty."""
+def register_json(json_file_path: Path, limit: int = None, dry_run: bool = False,
+                  marker: str = None, check_dups: bool = False) -> list:
+    """Lê os leads qualificados do JSON e cria as oportunidades no Antessala.
+
+    - O lote é atômico na API; aqui os itens são deduplicados e divididos em
+      lotes de até 1000 itens / 8 MB.
+    - O `id` de cada lead é determinístico (CNPJ, telefone ou nome + cidade),
+      então repetir a carga não duplica registros: a API devolve conflito e o
+      script segue apenas com os leads que ainda faltam.
+    - `marker` demarca os leads criados no nome e nas observações, útil para
+      cargas de teste que serão excluídas depois na tela do CRM.
+    """
+    json_file_path = Path(json_file_path)
     if not json_file_path.exists():
-        print(f"Error: JSON file '{json_file_path}' does not exist.", file=sys.stderr)
+        print(f"Erro: o arquivo JSON '{json_file_path}' não existe.", file=sys.stderr)
         sys.exit(1)
 
     try:
-        with open(json_file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
-        print(f"Error: Failed to parse JSON from '{json_file_path}': {e}", file=sys.stderr)
+        with open(json_file_path, "r", encoding="utf-8") as file_handle:
+            data = json.load(file_handle)
+    except json.JSONDecodeError as error:
+        print(f"Erro: falha ao interpretar o JSON de '{json_file_path}': {error}", file=sys.stderr)
         sys.exit(1)
-    except Exception as e:
-        print(f"Error reading JSON file: {e}", file=sys.stderr)
+    except Exception as error:
+        print(f"Erro ao ler o JSON: {error}", file=sys.stderr)
         sys.exit(1)
 
+    if isinstance(data, dict):
+        data = data.get("items") or data.get("data") or [data]
     if not isinstance(data, list):
         data = [data]
 
-    # Load environment variables from .env
-    load_env()
-
-    # Load API configuration from environment variables
-    token = os.environ.get("TWENTY_API_TOKEN")
-    base_url = os.environ.get("TWENTY_API_URL", "http://localhost:4000/rest")
-    
+    token, base_url = load_api_config()
     if not token or token == "your_token_here":
-        print("Error: TWENTY_API_TOKEN environment variable is not set correctly.", file=sys.stderr)
-        print("Please set it in the .env file in the project root:", file=sys.stderr)
-        print("  TWENTY_API_TOKEN=\"your_twenty_api_token\"", file=sys.stderr)
+        print("Erro: a variável ANTESSALA_TOKEN não está configurada corretamente.", file=sys.stderr)
+        print("Configure no .env da raiz do projeto:", file=sys.stderr)
+        print("  ANTESSALA_TOKEN=\"crm_...\"", file=sys.stderr)
+        print("  ANTESSALA_API_URL=\"https://antessala.panemiko.com\"", file=sys.stderr)
         sys.exit(1)
 
-    print(f"\n--- REGISTERING LEADS TO TWENTY CRM ---")
-    print(f"File:     {json_file_path}")
+    if marker:
+        marker = " ".join(str(marker).split())[:60]
+
+    total_read = len(data)
+    if limit is not None:
+        if limit <= 0:
+            print("Erro: --limit precisa ser maior que zero.", file=sys.stderr)
+            sys.exit(1)
+        data = data[:limit]
+
+    print("\n--- REGISTRANDO LEADS NO CRM ANTESSALA ---")
+    print(f"Arquivo:  {json_file_path}")
     print(f"API URL:  {base_url}")
-    print(f"Total:    {len(data)} leads")
-    print(f"---------------------------------------\n")
+    print(f"Lidos:    {total_read} lead(s)")
+    if limit is not None:
+        print(f"Limite:   {len(data)} lead(s) nesta execução")
+    print(f"Marcador: {marker or '(nenhum)'}")
+    print(f"Modo:     {'simulação (nada será gravado)' if dry_run else 'gravação'}")
+    print("-------------------------------------------\n")
 
-    success_count = 0
-    for idx, lead in enumerate(data, 1):
-        raw_name = lead.get("maps_title") or f"Lead #{idx}"
-        simplified_name = get_simplified_name(raw_name)
-        print(f"[{idx}/{len(data)}] Registering: {raw_name} (Simplified: {simplified_name})")
+    opportunities, skipped = prepare_opportunities(data, marker=marker)
 
-        # Check if the CNPJ is closed ("baixado")
-        cnpj_situacao = (lead.get("cnpj_situacao_cadastral") or "").strip().lower()
-        is_baixado = "baixada" in cnpj_situacao or "baixado" in cnpj_situacao
+    for index, name, reason in skipped:
+        print(f"  -> Item {index} ignorado ({name or 'sem nome'}): {reason}", file=sys.stderr)
 
-        # 1. Map and Create Company
-        # NOTE: cloud workspace has no cnpj/speciality fields and uses
-        # "emails" (not "eMail"). CNPJ details are preserved in
-        # initialObservations text via format_observations().
-        company_payload = {
-            "name": raw_name,
-            "simplifiedName": simplified_name
-        }
-        
-        # Domain name (ignoring social media links)
-        website = lead.get("maps_website") or ""
-        if website and not is_social_media(website):
-            if not website.startswith("http"):
-                website = "https://" + website
-            company_payload["domainName"] = {
-                "primaryLinkUrl": website,
-                "primaryLinkLabel": ""
-            }
-            
-        # Address
-        address_str = lead.get("maps_address") or lead.get("cnpj_endereco") or ""
-        maps_city = lead.get("maps_city") or ""
-        cep = ""
-        cep_match = re.search(r"CEP\s*([\d.-]+)", address_str, re.IGNORECASE)
-        if cep_match:
-            cep = cep_match.group(1).replace(".", "").replace("-", "").strip()
-            
-        company_payload["address"] = {
-            "addressCity": maps_city,
-            "addressState": lead.get("maps_state") or "",
-            "addressCountry": "Brazil",
-            "addressStreet1": normalize_address(address_str, maps_city),
-            "addressPostcode": cep
-        }
-        
-        # Phone / Whatsapp
-        phone_raw = lead.get("maps_phone") or lead.get("cnpj_telefone") or ""
-        if phone_raw:
-            company_payload["whatsapp"] = {
-                "primaryPhoneNumber": phone_raw,
-                "primaryPhoneCallingCode": "+55",
-                "primaryPhoneCountryCode": "BR"
-            }
-            
-        # Email
-        email = ""
-        if lead.get("maps_emails"):
-            emails_list = lead.get("maps_emails", "").split(",")
-            if emails_list:
-                email = emails_list[0].strip()
-        if not email:
-            email = lead.get("cnpj_email") or ""
-        if email:
-            company_payload["emails"] = {
-                "primaryEmail": email
-            }
-            
-        # Instagram
-        instagram_raw = lead.get("maps_instagram") or ""
-        if instagram_raw:
-            company_payload["instagram"] = {
-                "primaryLinkUrl": instagram_raw,
-                "primaryLinkLabel": ""
-            }
-            
-        # Market / Category
-        market = map_market(lead.get("maps_category"))
-        if market:
-            company_payload["market"] = market
+    print(f"Leads prontos para envio: {len(opportunities)}")
+    if skipped:
+        print(f"Leads ignorados na validação: {len(skipped)}")
 
-        status, response_data = make_twenty_request("companies", "POST", company_payload, token, base_url)
-        if status not in (200, 201):
-            print(f"  -> Error creating Company: Status {status}. Response: {response_data}", file=sys.stderr)
-            continue
-            
-        company_id = response_data.get("data", {}).get("createCompany", {}).get("id")
-        print(f"  -> Company created: ID {company_id}")
+    if not opportunities:
+        print("\nNada para enviar.")
+        return []
 
-        # 2. Extract and Create Persons (SOCIOS)
-        socios = [] if is_baixado else extract_socios(lead.get("cnpj_socios"))
-        point_of_contact_id = None
-        created_people_ids = []
-        
-        for idx_socio, socio in enumerate(socios):
-            person_payload = {
-                "name": {
-                    "firstName": socio["firstName"],
-                    "lastName": socio["lastName"]
-                },
-                "companyId": company_id,
-                "jobTitle": socio["role"] or "Sócio"
-            }
-            
-            # Copy email/phone contact only to the first person to avoid unique constraint conflicts
-            if idx_socio == 0:
-                if email:
-                    person_payload["emails"] = {
-                        "primaryEmail": email
-                    }
-                if phone_raw:
-                    person_payload["phones"] = {
-                        "primaryPhoneNumber": phone_raw,
-                        "primaryPhoneCallingCode": "+55",
-                        "primaryPhoneCountryCode": "BR"
-                    }
+    if dry_run:
+        print("\n--- PAYLOAD QUE SERIA ENVIADO ---")
+        for opportunity in opportunities:
+            print(json.dumps(opportunity, ensure_ascii=False, indent=2))
+        print("\nSimulação concluída. Nenhum lead foi gravado.")
+        return []
 
-            p_status, p_response = make_twenty_request("people", "POST", person_payload, token, base_url)
-            if p_status in (200, 201):
-                person_id = p_response.get("data", {}).get("createPerson", {}).get("id")
-                print(f"  -> Person '{socio['firstName']} {socio['lastName']}' created: ID {person_id}")
-                created_people_ids.append(person_id)
-                if not point_of_contact_id:
-                    point_of_contact_id = person_id
-            else:
-                print(f"  -> Warning: Failed to create Person '{socio['firstName']} {socio['lastName']}': Status {p_status}. Response: {p_response}", file=sys.stderr)
+    if not probe_health(base_url):
+        print("\nA API não está saudável. Abortando para não deixar carga pela metade.", file=sys.stderr)
+        return []
 
-        # 3. Create Opportunity
-        opp_payload = {
-            "name": raw_name,
-            "companyId": company_id,
-            "stage": map_stage(lead.get("review_score")),
-            "amount": {
-                "amountMicros": 1300000000,
-                "currencyCode": "BRL"
-            },
-            "initialObservations": format_observations(lead)
-        }
-        if point_of_contact_id:
-            opp_payload["pointOfContactId"] = point_of_contact_id
+    created = []
+    conflicts = []
+    failed = []
+    batches = list(_chunks(opportunities))
+    print(f"\nEnviando {len(opportunities)} lead(s) em {len(batches)} lote(s)...\n")
 
-        o_status, o_response = make_twenty_request("opportunities", "POST", opp_payload, token, base_url)
-        if o_status in (200, 201):
-            opp_id = o_response.get("data", {}).get("createOpportunity", {}).get("id")
-            print(f"  -> Opportunity created: ID {opp_id}")
-            success_count += 1
+    for batch_number, batch in enumerate(batches, 1):
+        print(f"[Lote {batch_number}/{len(batches)}] {len(batch)} lead(s)")
+        batch_created, batch_conflicts, batch_failed, status, _ = post_batch(batch, token, base_url)
+        created.extend(batch_created)
+        conflicts.extend(batch_conflicts)
+        failed.extend(batch_failed)
+
+        if status in (200, 201):
+            print(f"  -> {len(batch_created)} criado(s), {len(batch_conflicts)} já existente(s).")
         else:
-            print(f"  -> Error creating Opportunity: Status {o_status}. Response: {o_response}", file=sys.stderr)
-            # Cleanup Company and People to ensure no company without opportunity exists
-            print(f"  -> Cleaning up created Company and People to prevent orphaned records...")
-            # 1. Delete People
-            for p_id in created_people_ids:
-                del_p_status, del_p_resp = make_twenty_request(f"people/{p_id}", "DELETE", token=token, base_url=base_url)
-                if del_p_status in (200, 204):
-                    print(f"     -> Deleted Person ID {p_id}")
-                else:
-                    print(f"     -> Warning: Failed to delete Person ID {p_id}: Status {del_p_status}", file=sys.stderr)
-            # 2. Delete Company
-            del_c_status, del_c_resp = make_twenty_request(f"companies/{company_id}", "DELETE", token=token, base_url=base_url)
-            if del_c_status in (200, 204):
-                print(f"     -> Deleted Company ID {company_id}")
-            else:
-                print(f"     -> Warning: Failed to delete Company ID {company_id}: Status {del_c_status}", file=sys.stderr)
+            print(f"  -> Lote não concluído (HTTP {status}): {len(batch_failed)} lead(s) não gravado(s).", file=sys.stderr)
+            if status in (401, 403):
+                print("  -> Token inválido ou sem permissão de escrita. Abortando os lotes restantes.", file=sys.stderr)
+                break
 
-    # 4. Check for duplicate records in the CRM
-    check_duplicates()
+        if batch_number < len(batches):
+            time.sleep(0.3)
 
-    print(f"\n---------------------------------------")
-    print(f"Completed! Successfully registered {success_count}/{len(data)} leads in Twenty.")
-    print(f"---------------------------------------\n")
+    state_file = save_registration_state(json_file_path, base_url, marker, created, conflicts)
+
+    print("\n-------------------------------------------")
+    print("Carga concluída.")
+    print(f"Criados:            {len(created)}")
+    print(f"Já existiam:        {len(conflicts)}")
+    print(f"Não gravados:       {len(failed)}")
+    print(f"Estado da carga:    {state_file}")
+    print("-------------------------------------------\n")
+
+    if created:
+        print("LEADS CRIADOS NESTA EXECUÇÃO:")
+        for opportunity in created:
+            print(f"  - {opportunity.get('id')}  {opportunity.get('name')}")
+        print()
+
+    if conflicts:
+        print("LEADS PULADOS POR JÁ EXISTIREM (mesmo id):")
+        for opportunity in conflicts:
+            print(f"  - {opportunity.get('id')}  {opportunity.get('name')}")
+        print()
+
+    if failed:
+        print("LEADS NÃO GRAVADOS:", file=sys.stderr)
+        for opportunity in failed:
+            print(f"  - {opportunity.get('id')}  {opportunity.get('name')}", file=sys.stderr)
+        print(file=sys.stderr)
+
+    if marker and created:
+        print(f"ATENÇÃO: os leads acima estão marcados com [{marker}].")
+        print("Eles foram criados para teste e podem ser excluídos pela tela do CRM.\n")
+
+    if check_dups:
+        check_duplicates(token=token, base_url=base_url)
+    else:
+        print("Dica: rode 'python haumea duplicates' (token com leitura) para conferir repetidos.\n")
+
+    return [opportunity.get("id") for opportunity in created]
 
 
-def normalize_crm_names():
-    """Trims leading/trailing whitespace from all company names in Twenty CRM,
-    and synchronizes the name of all opportunities associated with each company
-    so they match the company's normalized (trimmed) name.
+def normalize_crm_names(token: str = None, base_url: str = None, dry_run: bool = False) -> None:
+    """Apara espaços nos nomes dos leads e preenche nomes simplificados vazios.
+
+    A API v1 não tem empresa nem PATCH: cada ajuste é um PUT parcial em
+    /api/v1/opportunities, um lead por requisição, respeitando o limite de
+    120 requisições por minuto do token.
     """
-    # Load environment variables from .env
-    load_env()
-
-    # Load API configuration from environment variables
-    token = os.environ.get("TWENTY_API_TOKEN")
-    base_url = os.environ.get("TWENTY_API_URL", "http://localhost:4000/rest")
+    if not token or not base_url:
+        token, base_url = load_api_config()
 
     if not token or token == "your_token_here":
-        print("[ERROR] TWENTY_API_TOKEN environment variable is not set correctly.", file=sys.stderr)
-        print("Please check your .env file in the project root.", file=sys.stderr)
+        print("[ERRO] ANTESSALA_TOKEN não está configurado corretamente.", file=sys.stderr)
+        print("Confira o .env na raiz do projeto.", file=sys.stderr)
         sys.exit(1)
 
-    print("\n--- CRM NAME NORMALIZATION & SYNC ---")
+    print("\n--- NORMALIZAÇÃO DE NOMES NO ANTESSALA ---")
     print(f"API URL: {base_url}")
-    print("-------------------------------------\n")
+    print(f"Modo:    {'simulação (nada será gravado)' if dry_run else 'gravação'}")
+    print("------------------------------------------\n")
 
-    # 1. Fetch all companies
-    print("[INFO] Fetching all companies from CRM...")
-    all_companies = []
-    starting_after = None
-    page = 1
-    while True:
-        query_params = {"limit": 60}
-        if starting_after:
-            query_params["starting_after"] = starting_after
+    opportunities = fetch_all_opportunities(token, base_url)
+    if not opportunities:
+        print("Nenhum lead pôde ser lido. Nada a normalizar.")
+        return
 
-        endpoint = f"companies?{urllib.parse.urlencode(query_params)}"
-        print(f"[DEBUG] Fetching companies page {page} (starting_after: {starting_after})...")
-        status, response = make_twenty_request(endpoint, "GET", token=token, base_url=base_url)
-        if status != 200:
-            print(f"[ERROR] Failed to fetch companies: Status {status}. Response: {response}", file=sys.stderr)
-            return
+    processed = 0
+    changed = 0
+    failures = 0
 
-        companies_chunk = response.get("data", {}).get("companies", [])
-        print(f"[DEBUG] Received {len(companies_chunk)} companies in page {page}.")
-        if not companies_chunk:
-            break
-        all_companies.extend(companies_chunk)
+    for index, opportunity in enumerate(opportunities, 1):
+        processed += 1
+        opportunity_id = opportunity.get("id")
+        changes = {}
 
-        page_info = response.get("pageInfo", {})
-        if page_info.get("hasNextPage") and page_info.get("endCursor"):
-            starting_after = page_info.get("endCursor")
-            page += 1
-        else:
-            break
+        for field in ("name", "simplifiedName", "city", "phone", "instagram", "currentWebsite"):
+            current = opportunity.get(field)
+            if isinstance(current, str):
+                cleaned = " ".join(current.split())
+                if cleaned != current:
+                    changes[field] = cleaned or None
 
-    print(f"[INFO] Successfully fetched {len(all_companies)} total companies from CRM.")
+        name = changes.get("name", opportunity.get("name"))
+        simplified = changes.get("simplifiedName", opportunity.get("simplifiedName"))
+        if name and not simplified:
+            changes["simplifiedName"] = name
 
-    # 2. Fetch all opportunities
-    print("[INFO] Fetching all opportunities from CRM...")
-    all_opportunities = []
-    starting_after = None
-    page = 1
-    while True:
-        query_params = {"limit": 60}
-        if starting_after:
-            query_params["starting_after"] = starting_after
-
-        endpoint = f"opportunities?{urllib.parse.urlencode(query_params)}"
-        print(f"[DEBUG] Fetching opportunities page {page} (starting_after: {starting_after})...")
-        status, response = make_twenty_request(endpoint, "GET", token=token, base_url=base_url)
-        if status != 200:
-            print(f"[ERROR] Failed to fetch opportunities: Status {status}. Response: {response}", file=sys.stderr)
-            return
-
-        opportunities_chunk = response.get("data", {}).get("opportunities", [])
-        print(f"[DEBUG] Received {len(opportunities_chunk)} opportunities in page {page}.")
-        if not opportunities_chunk:
-            break
-        all_opportunities.extend(opportunities_chunk)
-
-        page_info = response.get("pageInfo", {})
-        if page_info.get("hasNextPage") and page_info.get("endCursor"):
-            starting_after = page_info.get("endCursor")
-            page += 1
-        else:
-            break
-
-    print(f"[INFO] Successfully fetched {len(all_opportunities)} total opportunities from CRM.")
-
-    # 3. Group opportunities by companyId
-    print("[INFO] Grouping opportunities by their companyId...")
-    opps_by_company = {}
-    for opp in all_opportunities:
-        company_id = opp.get("companyId")
-        if company_id:
-            opps_by_company.setdefault(company_id, []).append(opp)
-    
-    print(f"[DEBUG] Grouped {len(all_opportunities)} opportunities under {len(opps_by_company)} unique companyIds.")
-
-    comp_processed = 0
-    comp_trimmed = 0
-    opp_processed = 0
-    opp_synced = 0
-
-    print("\n[INFO] Starting company name trim and opportunity name synchronization...")
-    for idx, comp in enumerate(all_companies, 1):
-        comp_id = comp.get("id")
-        current_name = comp.get("name")
-        
-        if not current_name:
-            print(f"[DEBUG] Company #{idx} has no name (ID: {comp_id}). Skipping.")
+        if not changes:
             continue
 
-        comp_processed += 1
-        trimmed_name = current_name.strip()
+        changed += 1
+        print(f"[{index}/{len(opportunities)}] {opportunity.get('name')} ({opportunity_id})")
+        print(f"  -> campos: {', '.join(sorted(changes))}")
 
-        # Update company name if leading/trailing whitespace was removed
-        if trimmed_name != current_name:
-            print(f"[ACTION] Company name requires trim: '{current_name}' -> '{trimmed_name}' (ID: {comp_id})")
-            payload = {"name": trimmed_name}
-            c_status, c_response = make_twenty_request(f"companies/{comp_id}", "PATCH", payload, token, base_url)
-            if c_status in (200, 201):
-                print(f"[SUCCESS] Company '{trimmed_name}' (ID: {comp_id}) updated successfully.")
-                comp_trimmed += 1
-                # Update current_name to trimmed_name for opportunity matching
-                current_name = trimmed_name
-            else:
-                print(f"[ERROR] Failed to update company (ID: {comp_id}). Status: {c_status}. Response: {c_response}", file=sys.stderr)
+        if dry_run:
+            continue
 
-        # Sync opportunities for this company to match the trimmed name
-        associated_opps = opps_by_company.get(comp_id, [])
-        if associated_opps:
-            print(f"[DEBUG] Company '{trimmed_name}' (ID: {comp_id}) has {len(associated_opps)} associated opportunities.")
-        
-        for opp in associated_opps:
-            opp_id = opp.get("id")
-            opp_name = opp.get("name")
-            opp_processed += 1
+        status, data, headers = make_api_request(
+            "opportunities", "PUT", {"id": opportunity_id, **changes},
+            token=token, base_url=base_url
+        )
+        if status == 200:
+            print("  -> Atualizado.")
+        else:
+            failures += 1
+            _print_api_error("Falha ao atualizar", status, data, headers)
+            if status in (401, 403):
+                print("  -> Abortando: token sem permissão.", file=sys.stderr)
+                break
 
-            # Sync opportunity name to match the parent company name
-            if opp_name != trimmed_name:
-                print(f"[ACTION] Syncing opportunity name: '{opp_name}' -> '{trimmed_name}' (Opp ID: {opp_id}, Comp ID: {comp_id})")
-                payload = {"name": trimmed_name}
-                o_status, o_response = make_twenty_request(f"opportunities/{opp_id}", "PATCH", payload, token, base_url)
-                if o_status in (200, 201):
-                    print(f"[SUCCESS] Opportunity ID {opp_id} updated successfully to '{trimmed_name}'.")
-                    opp_synced += 1
-                else:
-                    print(f"[ERROR] Failed to update opportunity (ID: {opp_id}). Status: {o_status}. Response: {o_response}", file=sys.stderr)
-            else:
-                print(f"[DEBUG] Opportunity '{opp_name}' (ID: {opp_id}) is already in sync with company '{trimmed_name}'.")
+        time.sleep(0.55)
 
-    print("\n--------------------------------------------")
-    print("Normalization and synchronization complete.")
-    print(f"Companies processed:        {comp_processed}")
-    print(f"Companies actually trimmed: {comp_trimmed}")
-    print(f"Opportunities parsed:       {opp_processed}")
-    print(f"Opportunities synced:       {opp_synced}")
-    print("--------------------------------------------\n")
-
-
+    print("\n------------------------------------------")
+    print(f"Leads analisados:       {processed}")
+    print(f"Leads com ajuste:       {changed}")
+    print(f"Falhas:                 {failures}")
+    print("------------------------------------------\n")

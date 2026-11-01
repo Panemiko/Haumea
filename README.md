@@ -93,9 +93,28 @@ python haumea review <cleaned_file.csv> [options]
 > - `exit` / `quit` to exit saving progress.
 
 ### 4. Register Payload (POST)
-Once your leads are qualified and converted (see [prompts/convert.md](file:///home/panemiko/Documentos/Haumea/system/prompts/convert.md)), POST the final JSON payload to the webhook endpoint:
+Once your leads are qualified and converted (see [prompts/convert.md](file:///home/panemiko/Documentos/Haumea/system/prompts/convert.md)), create them in the Antessala CRM through API v1:
 ```bash
 python haumea register <json_file.json>
+```
+
+The leads are sent in idempotent batches (deterministic `id`), so re-running the same file skips what already exists. Useful options:
+
+```bash
+# Simular sem gravar
+python haumea register leads.json --dry-run
+
+# Carga de teste com 2 leads demarcados para exclusão posterior
+python haumea register leads.json --limit 2 --marker "TESTE HAUMEA"
+
+# Conferir duplicados depois da carga (exige token com leitura)
+python haumea register leads.json --check-duplicates
+```
+
+Configure o acesso no `.env` da raiz:
+```
+ANTESSALA_API_URL="https://antessala.panemiko.com"
+ANTESSALA_TOKEN="crm_..."
 ```
 
 ---

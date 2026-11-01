@@ -72,24 +72,39 @@ Options:
 """)
     elif subcommand == 'register':
         print("""
-Usage: haumea register <json_file>
+Usage: haumea register <json_file> [options]
 
-Read a JSON file and POST its content to the webhook API.
+Cria oportunidades (leads) no CRM Antessala a partir do JSON qualificado.
+A API v1 recebe os leads em lote, com id determinístico para evitar duplicados.
 
 Arguments:
   json_file             Path to the JSON file containing the registration information.
+
+Options:
+  --limit N             Envia somente os N primeiros leads do arquivo.
+  --dry-run             Mostra o payload sem gravar nada no CRM.
+  --marker TEXTO        Demarca os leads no nome e nas observações (útil em teste).
+  --check-duplicates    Confere leads repetidos depois da carga (exige token com leitura).
+
+Configuração (.env na raiz do projeto):
+  ANTESSALA_TOKEN       Token pessoal crm_... com escopo write ou full.
+  ANTESSALA_API_URL     URL base do CRM (padrão: https://antessala.panemiko.com).
 """)
     elif subcommand == 'duplicates':
         print("""
 Usage: haumea duplicates
 
-Check for duplicate records (by WhatsApp and CNPJ) in the Twenty CRM.
+Check for duplicate leads (by phone and by name + city) in the Antessala CRM.
+Requires a token with read or full scope.
 """)
     elif subcommand == 'normalize':
         print("""
-Usage: haumea normalize
+Usage: haumea normalize [options]
 
-Trim company names and synchronize opportunity names (companies -> opportunities) in Twenty CRM.
+Trim whitespace from lead names and fill empty simplified names in the Antessala CRM.
+
+Options:
+  --dry-run             Only report what would change, without writing.
 """)
     elif subcommand == 'convert':
         print("""
@@ -131,9 +146,9 @@ Usage: haumea [all] <input_file> [options]               Run the clean and revie
   haumea clean <input_file> [options]               Run clean module only
   haumea review <input_file> [options]              Run review module only
   haumea convert <input_file> [options]             Convert CSV sheet to JSON format
-  haumea register <json_file>                       Register information to webhook
-  haumea duplicates                                 Check for duplicates in CRM
-  haumea normalize                                  Trim company names and sync opportunity names in CRM
+  haumea register <json_file> [options]             Register leads in the Antessala CRM
+  haumea duplicates                                 Check for duplicate leads in the CRM
+  haumea normalize [--dry-run]                      Trim lead names in the CRM
   haumea help [subcommand]                          Show help for a command
 
 Subcommands:
@@ -141,9 +156,9 @@ Subcommands:
   clean             Clean a CSV file (keep specific fields, add columns).
   review            Capture website screenshots and collect user feedback.
   convert           Convert any CSV sheet into a registry-ready JSON file.
-  register          Post JSON file content to the webhook API.
-  duplicates        Check for duplicate records (by WhatsApp and CNPJ) in the CRM.
-  normalize         Trim company names and sync opportunity names in CRM.
+  register          Create leads in the Antessala CRM from a JSON file.
+  duplicates        Check for duplicate leads (by phone and name) in the CRM.
+  normalize         Trim lead names and fill empty simplified names in the CRM.
   all               Clean and then review.
   help              Display help information.
 
@@ -205,12 +220,17 @@ def main():
     # Register Parser
     register_parser = subparsers.add_parser("register", add_help=False)
     register_parser.add_argument("json_file")
+    register_parser.add_argument("--limit", type=int, default=None)
+    register_parser.add_argument("--dry-run", action="store_true")
+    register_parser.add_argument("--marker", default=None)
+    register_parser.add_argument("--check-duplicates", action="store_true")
     
     # Duplicates Parser
     duplicates_parser = subparsers.add_parser("duplicates", add_help=False)
     
     # Normalize Parser
     normalize_parser = subparsers.add_parser("normalize", add_help=False)
+    normalize_parser.add_argument("--dry-run", action="store_true")
     
     # Convert Parser
     convert_parser = subparsers.add_parser("convert", add_help=False)
@@ -290,7 +310,13 @@ def main():
         
     # Handle register subcommand
     elif args.command == "register":
-        register_json(Path(args.json_file))
+        register_json(
+            Path(args.json_file),
+            limit=args.limit,
+            dry_run=args.dry_run,
+            marker=args.marker,
+            check_dups=args.check_duplicates,
+        )
         
     # Handle duplicates subcommand
     elif args.command == "duplicates":
@@ -300,7 +326,7 @@ def main():
     # Handle normalize subcommand
     elif args.command == "normalize":
         from scripts.register import normalize_crm_names
-        normalize_crm_names()
+        normalize_crm_names(dry_run=args.dry_run)
         
     # Handle convert subcommand
     elif args.command == "convert":

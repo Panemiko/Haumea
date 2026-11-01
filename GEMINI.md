@@ -23,7 +23,7 @@ The system is structured as follows:
         *   [`scripts/cleaner.py`](file:///home/panemiko/Documentos/Haumea/system/scripts/cleaner.py) - Logic for cleaning raw scraped CSVs, extracting fields, and normalizing Brazilian states/cities.
         *   [`scripts/reviewer.py`](file:///home/panemiko/Documentos/Haumea/system/scripts/reviewer.py) - Interactive CLI tool for website reviews, opening URLs in Chrome/Chromium, capturing feedback, and assigning qualification scores.
         *   [`scripts/viewer.py`](file:///home/panemiko/Documentos/Haumea/system/scripts/viewer.py) - A PySide6-based helper application to display screenshots on secondary monitors or center them nicely.
-        *   [`scripts/register.py`](file:///home/panemiko/Documentos/Haumea/system/scripts/register.py) - Script to POST the final qualified JSON payload to the webhook endpoint.
+        *   [`scripts/register.py`](file:///home/panemiko/Documentos/Haumea/system/scripts/register.py) - Converts qualified leads to the Antessala CRM (API v1) and sends them in idempotent batches.
         *   [`scripts/utils.py`](file:///home/panemiko/Documentos/Haumea/system/scripts/utils.py) - Utility helper functions (e.g., filename sanitization).
     *   [`prompts/`](file:///home/panemiko/Documentos/Haumea/system/prompts) - System prompts and LLM instruction resources:
         *   [`prompts/convert.md`](file:///home/panemiko/Documentos/Haumea/system/prompts/convert.md) - System prompt specifying rules for converting cleaned CSV leads into standardized JSON, including Brazilian phone formatting, market categorization, and a website qualification rubric.
@@ -37,7 +37,7 @@ The general pipeline operates in four major phases:
 1.  **Scrape**: Run the precompiled Go binary ([`google_maps_scraper-1.3.0-linux-amd64`](file:///home/panemiko/Documentos/Haumea/system/google_maps_scraper-1.3.0-linux-amd64)) via [`scripts/scraper.py`](file:///home/panemiko/Documentos/Haumea/system/scripts/scraper.py) using the `scrape` subcommand.
 2.  **Clean**: Keep specific CSV fields (`title`, `category`, `address`, `website`, `phone`, `emails`), parse the city and state, and format Brazilian phone numbers. This is run via [`scripts/cleaner.py`](file:///home/panemiko/Documentos/Haumea/system/scripts/cleaner.py) using the `clean` subcommand.
 3.  **Review**: Interactively evaluate the leads' websites, capture screenshots, compile observations, and assign qualification scores (1 to 5) indicating the likelihood of selling a website redesign. This is handled via [`scripts/reviewer.py`](file:///home/panemiko/Documentos/Haumea/system/scripts/reviewer.py) using the `review` subcommand.
-4.  **Register**: Send the qualified leads structured as JSON to the webhook API endpoint using [`scripts/register.py`](file:///home/panemiko/Documentos/Haumea/system/scripts/register.py) via the `register` subcommand.
+4.  **Register**: Create the qualified leads in the Antessala CRM (API v1) using [`scripts/register.py`](file:///home/panemiko/Documentos/Haumea/system/scripts/register.py) via the `register` subcommand.
 
 Alternatively, the pipeline can be run end-to-end (Clean & Review) with the default command:
 ```bash
